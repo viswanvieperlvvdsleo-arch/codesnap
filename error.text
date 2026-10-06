@@ -1,0 +1,38 @@
+PS C:\codesnap> flutter run
+Connected devices:
+Windows (desktop) • windows • windows-x64    • Microsoft Windows [Version 10.0.26200.8655]
+Chrome (web)      • chrome  • web-javascript • Google Chrome 149.0.7827.201
+Edge (web)        • edge    • web-javascript • Microsoft Edge 149.0.4022.98
+[1]: Windows (windows)
+[2]: Chrome (chrome)
+[3]: Edge (edge)
+Please choose one (or "q" to quit): 2
+Launching lib\main.dart on Chrome in debug mode...
+lib/screens/home_feed_screen.dart:216:14: Error: The method 'SpringButton' isn't defined for the type '_HomeFeedScreenState'.
+ - '_HomeFeedScreenState' is from 'package:codesnap/screens/home_feed_screen.dart' ('lib/screens/home_feed_screen.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'SpringButton'.
+      child: SpringButton(
+             ^^^^^^^^^^^^
+lib/screens/home_feed_screen.dart:408:12: Error: The method 'SpringButton' isn't defined for the type '_HomeFeedScreenState'.
+ - '_HomeFeedScreenState' is from 'package:codesnap/screens/home_feed_screen.dart' ('lib/screens/home_feed_screen.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'SpringButton'.
+    return SpringButton(
+           ^^^^^^^^^^^^
+lib/screens/home_feed_screen.dart:594:21: Error: The method 'SpringButton' isn't defined for the type '_HomeFeedScreenState'.
+ - '_HomeFeedScreenState' is from 'package:codesnap/screens/home_feed_screen.dart' ('lib/screens/home_feed_screen.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'SpringButton'.
+                    SpringButton(
+                    ^^^^^^^^^^^^
+lib/screens/home_feed_screen.dart:716:15: Error: The method 'SpringButton' isn't defined for the type '_HomeFeedScreenState'.
+ - '_HomeFeedScreenState' is from 'package:codesnap/screens/home_feed_screen.dart' ('lib/screens/home_feed_screen.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'SpringButton'.
+              SpringButton(
+              ^^^^^^^^^^^^
+lib/screens/home_feed_screen.dart:736:48: Error: The method 'SpringButton' isn't defined for the type '_HomeFeedScreenState'.
+ - '_HomeFeedScreenState' is from 'package:codesnap/screens/home_feed_screen.dart' ('lib/screens/home_feed_screen.dart').
+Try correcting the name to the name of an existing method, or defining a method named 'SpringButton'.
+              itemBuilder: (context, index) => SpringButton(
+                                               ^^^^^^^^^^^^
+Waiting for connection from debug service on Chrome...             33.8s
+Failed to compile application.
+PS C:\codesnap> 

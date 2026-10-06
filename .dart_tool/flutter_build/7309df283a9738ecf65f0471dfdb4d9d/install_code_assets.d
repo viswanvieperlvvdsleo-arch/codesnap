@@ -1,0 +1,1 @@
+ C:\\codesnap\\.dart_tool\\flutter_build\\7309df283a9738ecf65f0471dfdb4d9d\\native_assets.json: 
