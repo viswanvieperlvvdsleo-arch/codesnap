@@ -17,6 +17,8 @@ import '../services/storage_picker.dart';
 import '../widgets/full_screen_image_viewer.dart';
 import '../widgets/expandable_text.dart';
 import '../widgets/morphing_capsule.dart';
+import '../services/supabase_data_service.dart';
+import '../services/local_posts_cache.dart';
 
 
 // ── Liquid Glass Color Tokens (Strict Glass Palette: Obsidian, White, Cyan) ──
@@ -59,6 +61,91 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
     _tabController = TabController(length: 3, vsync: this);
     _isFollowing = widget.user.isFollowing;
     _followersCount = widget.user.followersCount;
+    _loadUserPosts();
+  }
+
+  Future<void> _loadUserPosts() async {
+    try {
+      if (widget.isSelf) {
+        final cached = await LocalPostsCache.loadPosts();
+        if (mounted && cached.isNotEmpty && widget.user.posts.isEmpty) {
+          final List<UserPostItem> localUserPosts = [];
+          final List<UserMediaItem> localMedia = [];
+          for (final cp in cached) {
+            localUserPosts.add(UserPostItem(
+              id: cp.id,
+              content: cp.captionBody.isNotEmpty ? cp.captionBody : cp.captionTitle,
+              codeSnippet: cp.imageUrl.isNotEmpty ? null : cp.captionBody,
+              likesCount: cp.likesCount,
+              commentsCount: cp.commentsCount,
+              timestamp: 'Recent',
+            ));
+            if (cp.imageUrl.isNotEmpty) {
+              localMedia.add(UserMediaItem(
+                id: cp.id,
+                title: cp.captionTitle,
+                type: 'image',
+                mediaUrl: cp.imageUrl,
+                thumbnailUrl: cp.imageUrl,
+                fileSize: '1.2 MB',
+                likesCount: cp.likesCount,
+                viewsCount: 1,
+                timestamp: 'Recent',
+              ));
+            }
+          }
+          setState(() {
+            widget.user.posts = localUserPosts;
+            widget.user.mediaItems = localMedia;
+            widget.user.postsCount = localUserPosts.length;
+          });
+        }
+      }
+
+      final posts = await SupabaseDataService.fetchUserPosts(widget.user.id);
+      if (!mounted || posts.isEmpty) return;
+      final List<UserPostItem> userPosts = [];
+      final List<UserMediaItem> mediaItems = [];
+      for (final p in posts) {
+        final snippet = p['code_snippet']?.toString();
+        final isImage = snippet != null && (snippet.startsWith('http') || snippet.startsWith('data:image') || snippet.startsWith('blob:'));
+        final desc = p['description']?.toString() ?? '';
+        final title = p['title']?.toString() ?? 'Post';
+        userPosts.add(UserPostItem(
+          id: p['id'].toString(),
+          content: desc.isNotEmpty ? desc : title,
+          codeSnippet: (!isImage && snippet != null && snippet.isNotEmpty) ? snippet : null,
+          language: p['code_language']?.toString(),
+          likesCount: (p['likes_count'] as num?)?.toInt() ?? 0,
+          commentsCount: (p['comments_count'] as num?)?.toInt() ?? 0,
+          timestamp: 'Recent',
+        ));
+        if (isImage) {
+          mediaItems.add(UserMediaItem(
+            id: p['id'].toString(),
+            title: title,
+            type: 'image',
+            mediaUrl: snippet,
+            thumbnailUrl: snippet,
+            fileSize: '1.2 MB',
+            likesCount: (p['likes_count'] as num?)?.toInt() ?? 0,
+            viewsCount: 1,
+            timestamp: 'Recent',
+          ));
+        }
+      }
+      if (mounted) {
+        setState(() {
+          final Set<String> remoteIds = userPosts.map((up) => up.id).toSet();
+          final localUnsynced = widget.user.posts.where((lp) => !remoteIds.contains(lp.id)).toList();
+          widget.user.posts = [...localUnsynced, ...userPosts];
+          widget.user.mediaItems = mediaItems;
+          widget.user.postsCount = widget.user.posts.length;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading user profile posts: $e');
+    }
   }
 
   @override
@@ -208,11 +295,57 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Pick a curated developer avatar or paste an image URL:',
-                style: TextStyle(color: Color(0xFF888899), fontSize: 13),
+              const SizedBox(height: 12),
+              SpringButton(
+                onTap: () async {
+                  final picker = getStoragePicker();
+                  final picked = await picker.pickImage();
+                  if (picked != null) {
+                    final chosenUrl = picked.pathOrDataUrl;
+                    setState(() {
+                      widget.user.avatarUrl = chosenUrl;
+                    });
+                    if (widget.isSelf) {
+                      try {
+                        final auth = Provider.of<AuthProvider>(context, listen: false);
+                        await auth.updateProfile(avatarUrl: chosenUrl);
+                      } catch (e) {
+                        debugPrint('Error updating avatar from device: $e');
+                      }
+                    }
+                    if (mounted) {
+                      Navigator.pop(ctx);
+                      _showGlassToast('Profile photo updated!', icon: LucideIcons.check, isSuccess: true);
+                    }
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _kAccentCyan.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _kAccentCyan.withOpacity(0.4)),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(LucideIcons.imagePlus, color: _kAccentCyan, size: 18),
+                      SizedBox(width: 8),
+                      Text(
+                        'Upload from Device / Gallery',
+                        style: TextStyle(color: _kAccentCyan, fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
+              const Text(
+                'Or pick a curated avatar / paste an image URL:',
+                style: TextStyle(color: Color(0xFF888899), fontSize: 12),
+              ),
+              const SizedBox(height: 12),
               SizedBox(
                 height: 64,
                 child: ListView.separated(
@@ -222,12 +355,23 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   itemBuilder: (c, idx) {
                     final isSelected = widget.user.avatarUrl == avatars[idx];
                     return GestureDetector(
-                      onTap: () {
+                      onTap: () async {
+                        final chosenAvatar = avatars[idx];
                         setState(() {
-                          widget.user.avatarUrl = avatars[idx];
+                          widget.user.avatarUrl = chosenAvatar;
                         });
-                        Navigator.pop(ctx);
-                        _showGlassToast('Profile photo updated!', icon: LucideIcons.check, isSuccess: true);
+                        if (widget.isSelf) {
+                          try {
+                            final auth = Provider.of<AuthProvider>(context, listen: false);
+                            await auth.updateProfile(avatarUrl: chosenAvatar);
+                          } catch (e) {
+                            debugPrint('Error updating avatar: $e');
+                          }
+                        }
+                        if (mounted) {
+                          Navigator.pop(ctx);
+                          _showGlassToast('Profile photo saved to database!', icon: LucideIcons.check, isSuccess: true);
+                        }
                       },
                       child: Container(
                         padding: const EdgeInsets.all(2),
@@ -282,13 +426,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   ),
                   const SizedBox(width: 8),
                   SpringButton(
-                    onTap: () {
-                      if (urlController.text.trim().isNotEmpty) {
+                    onTap: () async {
+                      final customUrl = urlController.text.trim();
+                      if (customUrl.isNotEmpty) {
                         setState(() {
-                          widget.user.avatarUrl = urlController.text.trim();
+                          widget.user.avatarUrl = customUrl;
                         });
-                        Navigator.pop(ctx);
-                        _showGlassToast('Profile photo updated!', icon: LucideIcons.check, isSuccess: true);
+                        if (widget.isSelf) {
+                          try {
+                            final auth = Provider.of<AuthProvider>(context, listen: false);
+                            await auth.updateProfile(avatarUrl: customUrl);
+                          } catch (e) {
+                            debugPrint('Error updating custom avatar: $e');
+                          }
+                        }
+                        if (mounted) {
+                          Navigator.pop(ctx);
+                          _showGlassToast('Profile photo saved to database!', icon: LucideIcons.check, isSuccess: true);
+                        }
                       }
                     },
                     child: Container(
@@ -357,25 +512,46 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   SpringButton(
-                    onTap: () {
+                    onTap: () async {
+                      final newName = nameCtrl.text.trim();
+                      final newHeadline = headlineCtrl.text.trim();
+                      final newBio = bioCtrl.text.trim();
+                      final newDept = deptCtrl.text.trim();
+                      final skillList = skillsCtrl.text
+                          .split(',')
+                          .map((s) => s.trim())
+                          .where((s) => s.isNotEmpty)
+                          .toList();
+
                       setState(() {
-                        if (nameCtrl.text.trim().isNotEmpty) {
-                          widget.user.name = nameCtrl.text.trim();
+                        if (newName.isNotEmpty) {
+                          widget.user.name = newName;
                         }
-                        widget.user.headline = headlineCtrl.text.trim();
-                        widget.user.bio = bioCtrl.text.trim();
-                        widget.user.department = deptCtrl.text.trim();
-                        final skillList = skillsCtrl.text
-                            .split(',')
-                            .map((s) => s.trim())
-                            .where((s) => s.isNotEmpty)
-                            .toList();
-                        if (skillList.isNotEmpty) {
-                          widget.user.skills = skillList;
-                        }
+                        widget.user.headline = newHeadline;
+                        widget.user.bio = newBio;
+                        widget.user.department = newDept;
+                        widget.user.skills = skillList;
                       });
-                      Navigator.pop(ctx);
-                      _showGlassToast('Profile details updated!', icon: LucideIcons.check, isSuccess: true);
+
+                      if (widget.isSelf) {
+                        try {
+                          final auth = Provider.of<AuthProvider>(context, listen: false);
+                          await auth.updateProfile(
+                            name: newName.isNotEmpty ? newName : null,
+                            headline: newHeadline,
+                            bio: newBio,
+                            department: newDept,
+                            skills: skillList,
+                          );
+                        } catch (e) {
+                          debugPrint('Error saving profile to Supabase DB: $e');
+                        }
+                      }
+
+                      if (mounted) {
+                        Navigator.pop(ctx);
+                        _showGlassToast('Profile saved to database!', icon: LucideIcons.check, isSuccess: true);
+                      }
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -482,6 +658,15 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                               widget.user.posts.insert(0, newPost);
                               widget.user.postsCount += 1;
                             });
+                            SupabaseDataService.createPost(
+                              description: postContentCtrl.text.trim(),
+                              codeSnippet: codeSnippetCtrl.text.trim().isNotEmpty ? codeSnippetCtrl.text.trim() : null,
+                              codeLanguage: codeLangCtrl.text.trim().isNotEmpty ? codeLangCtrl.text.trim() : 'dart',
+                              userId: widget.user.id,
+                              authorUsername: widget.user.handle.replaceAll('@', ''),
+                              authorFullName: widget.user.name,
+                              authorAvatar: widget.user.avatarUrl,
+                            );
                             Navigator.pop(ctx);
                             _showGlassToast('Post published to profile!', icon: LucideIcons.checkCircle, isSuccess: true);
                           } else {
@@ -508,6 +693,15 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                               widget.user.mediaItems.insert(0, newMedia);
                               widget.user.postsCount += 1;
                             });
+                            SupabaseDataService.createPost(
+                              description: mediaTitleCtrl.text.trim(),
+                              title: mediaTitleCtrl.text.trim(),
+                              codeSnippet: url,
+                              userId: widget.user.id,
+                              authorUsername: widget.user.handle.replaceAll('@', ''),
+                              authorFullName: widget.user.name,
+                              authorAvatar: widget.user.avatarUrl,
+                            );
                             Navigator.pop(ctx);
                             _showGlassToast('New media published!', icon: LucideIcons.checkCircle, isSuccess: true);
                           }
@@ -849,18 +1043,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
 
                   // Save & Set Everywhere Button
                   SpringButton(
-                    onTap: () {
+                    onTap: () async {
                       final updatedUrl = rawImageUrl;
                       setState(() {
                         widget.user.avatarUrl = updatedUrl;
                       });
                       MockData.selfUser.avatarUrl = updatedUrl;
-                      try {
-                        final auth = Provider.of<AuthProvider>(context, listen: false);
-                        auth.currentUser?.avatarUrl = updatedUrl;
-                      } catch (_) {}
-                      Navigator.pop(ctx);
-                      _showGlassToast('Profile photo updated everywhere!', icon: LucideIcons.check, isSuccess: true);
+                      if (widget.isSelf) {
+                        try {
+                          final auth = Provider.of<AuthProvider>(context, listen: false);
+                          await auth.updateProfile(avatarUrl: updatedUrl);
+                        } catch (e) {
+                          debugPrint('Error saving studio avatar to Supabase: $e');
+                        }
+                      }
+                      if (mounted) {
+                        Navigator.pop(ctx);
+                        _showGlassToast('Profile photo saved to database!', icon: LucideIcons.check, isSuccess: true);
+                      }
                     },
                     child: Container(
                       width: double.infinity,
@@ -1636,19 +1836,22 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               const SizedBox(height: 14),
 
               // 3. Fullscreen View option
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(LucideIcons.expand, color: Colors.white70),
-                title: const Text('View Current Photo Fullscreen', style: TextStyle(color: Colors.white, fontSize: 13.5)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  FullScreenImageViewer.show(
-                    context,
-                    imageUrl: widget.user.avatarUrl,
-                    title: widget.user.name,
-                    heroTag: 'people-avatar-${widget.user.id}',
-                  );
-                },
+              Material(
+                color: Colors.transparent,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(LucideIcons.expand, color: Colors.white70),
+                  title: const Text('View Current Photo Fullscreen', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    FullScreenImageViewer.show(
+                      context,
+                      imageUrl: widget.user.avatarUrl,
+                      title: widget.user.name,
+                      heroTag: 'people-avatar-${widget.user.id}',
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -2433,10 +2636,13 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         height: 220,
                         width: double.infinity,
                         decoration: BoxDecoration(
-                          image: DecorationImage(
-                            image: NetworkImage(user.bannerUrl),
-                            fit: BoxFit.cover,
-                          ),
+                          color: const Color(0xFF161822),
+                          image: user.bannerUrl.isNotEmpty
+                              ? DecorationImage(
+                                  image: NetworkImage(user.bannerUrl),
+                                  fit: BoxFit.cover,
+                                )
+                              : null,
                         ),
                         child: Container(
                           decoration: BoxDecoration(
@@ -2590,6 +2796,7 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                 height: 92,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
+                                  color: _kGlassElevated,
                                   border: Border.all(
                                       color: _kGlassHighlight, width: 2.5),
                                   boxShadow: [
@@ -2599,10 +2806,19 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                       offset: const Offset(0, 6),
                                     ),
                                   ],
-                                  image: DecorationImage(
-                                    image: NetworkImage(user.avatarUrl),
-                                    fit: BoxFit.cover,
-                                  ),
+                                ),
+                                child: ClipOval(
+                                  child: user.avatarUrl.isNotEmpty
+                                      ? Image.network(
+                                          user.avatarUrl,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => const Center(
+                                            child: Icon(LucideIcons.user, color: Colors.white70, size: 40),
+                                          ),
+                                        )
+                                      : const Center(
+                                          child: Icon(LucideIcons.user, color: Colors.white70, size: 40),
+                                        ),
                                 ),
                               ),
                             ),
@@ -2921,68 +3137,96 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   const SizedBox(height: 10),
 
                   // Headline
-                  Text(
-                    user.headline,
-                    style: const TextStyle(
-                      color: Color(0xFFD4D4D8),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      height: 1.35,
+                  if (user.headline.isNotEmpty) ...[
+                    Text(
+                      user.headline,
+                      style: const TextStyle(
+                        color: Color(0xFFD4D4D8),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        height: 1.35,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
+                    const SizedBox(height: 8),
+                  ] else if (widget.isSelf) ...[
+                    const Text(
+                      'No headline set • Tap Edit Profile to customize',
+                      style: TextStyle(
+                        color: Colors.white38,
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
 
                   // Bio with Read more / Read less
-                  ExpandableText(
-                    text: user.bio,
-                    maxLines: 4,
-                    style: const TextStyle(
-                      color: Color(0xFFA1A1AA),
-                      fontSize: 13,
-                      height: 1.45,
+                  if (user.bio.isNotEmpty) ...[
+                    ExpandableText(
+                      text: user.bio,
+                      maxLines: 4,
+                      style: const TextStyle(
+                        color: Color(0xFFA1A1AA),
+                        fontSize: 13,
+                        height: 1.45,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
+                    const SizedBox(height: 14),
+                  ] else if (widget.isSelf) ...[
+                    const Text(
+                      'No bio added yet.',
+                      style: TextStyle(
+                        color: Colors.white38,
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
 
-                  // Location & Department wrap (prevents overflow on narrow screens)
-                  Wrap(
-                    spacing: 14,
-                    runSpacing: 6,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(LucideIcons.mapPin,
-                              size: 14, color: Color(0xFF71717A)),
-                          const SizedBox(width: 6),
-                          Text(
-                            user.location,
-                            style: const TextStyle(
-                              color: Color(0xFF888899),
-                              fontSize: 12,
-                            ),
+                  // Location & Department wrap
+                  if (user.location.isNotEmpty || user.department.isNotEmpty) ...[
+                    Wrap(
+                      spacing: 14,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (user.location.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(LucideIcons.mapPin,
+                                  size: 14, color: Color(0xFF71717A)),
+                              const SizedBox(width: 6),
+                              Text(
+                                user.location,
+                                style: const TextStyle(
+                                  color: Color(0xFF888899),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(LucideIcons.graduationCap,
-                              size: 14, color: Color(0xFF71717A)),
-                          const SizedBox(width: 6),
-                          Text(
-                            user.department,
-                            style: const TextStyle(
-                              color: Color(0xFF888899),
-                              fontSize: 12,
-                            ),
+                        if (user.department.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(LucideIcons.graduationCap,
+                                  size: 14, color: Color(0xFF71717A)),
+                              const SizedBox(width: 6),
+                              Text(
+                                user.department,
+                                style: const TextStyle(
+                                  color: Color(0xFF888899),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                  ],
 
                   // Social Stats Card (Liquid Glass)
                   ClipRRect(
@@ -3016,35 +3260,38 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   ),
                   const SizedBox(height: 18),
 
-                  // Skills Chips (Smooth horizontal scroll prevents any edge clipping/overflow)
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Row(
-                      children: user.skills.map((skill) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF14151B),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: _kGlassBorder),
-                            ),
-                            child: Text(
-                              skill,
-                              style: const TextStyle(
-                                color: Color(0xFFCCCCCC),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
+                  // Skills Chips
+                  if (user.skills.isNotEmpty) ...[
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      child: Row(
+                        children: user.skills.map((skill) {
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF14151B),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: _kGlassBorder),
+                              ),
+                              child: Text(
+                                skill,
+                                style: const TextStyle(
+                                  color: Color(0xFFCCCCCC),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ),
-                          ),
-                        );
-                      }).toList(),
+                          );
+                        }).toList(),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 18),
+                  ],
                   const SizedBox(height: 20),
 
                   // Segmented Glass Tabs

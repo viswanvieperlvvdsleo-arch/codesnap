@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bug (CodeSnap) — Next-Gen Developer Social & Mobile Workspace</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07080b;
+      --card-bg: rgba(18, 20, 29, 0.75);
+      --card-border: rgba(255, 255, 255, 0.12);
+      --primary: #ffd700;
+      --primary-glow: rgba(255, 215, 0, 0.35);
+      --cyan: #54c5f8;
+      --cyan-glow: rgba(84, 197, 248, 0.35);
+      --pink: #ff4864;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --code-bg: #0d0f17;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      line-height: 1.6;
+    }
+
+    /* Background Ambient Light Orbs */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(140px);
+      z-index: -1;
+      opacity: 0.28;
+      pointer-events: none;
+    }
+    .orb-1 {
+      width: 450px;
+      height: 450px;
+      top: -100px;
+      left: 10%;
+      background: var(--primary);
+    }
+    .orb-2 {
+      width: 550px;
+      height: 550px;
+      top: 35%;
+      right: -120px;
+      background: var(--cyan);
+    }
+    .orb-3 {
+      width: 400px;
+      height: 400px;
+      bottom: 5%;
+      left: 20%;
+      background: var(--pink);
+    }
+
+    /* Container */
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Header Nav */
+    header {
+      padding: 24px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(20px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(7, 8, 11, 0.7);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: #fff;
+    }
+
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #ffd700, #ff8c00);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 800;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+
+    .brand-name {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+
+    .nav-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      transition: color 0.2s;
+    }
+    .nav-link:hover {
+      color: #fff;
+    }
+
+    .btn-nav-download {
+      background: rgba(255, 215, 0, 0.15);
+      border: 1px solid var(--primary);
+      color: var(--primary);
+      padding: 8px 18px;
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+    .btn-nav-download:hover {
+      background: var(--primary);
+      color: #000;
+      box-shadow: 0 0 25px var(--primary-glow);
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 90px 0 60px;
+      text-align: center;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 100px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--primary);
+      margin-bottom: 24px;
+    }
+
+    .badge-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 10px #10b981;
+    }
+
+    .hero-title {
+      font-size: clamp(38px, 6vw, 68px);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -1.5px;
+      margin-bottom: 24px;
+    }
+
+    .gradient-text {
+      background: linear-gradient(135deg, #ffd700 0%, #54c5f8 50%, #ffffff 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-desc {
+      font-size: clamp(16px, 2.2vw, 20px);
+      color: var(--text-muted);
+      max-width: 680px;
+      margin: 0 auto 40px;
+    }
+
+    .cta-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 30px;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #000;
+      padding: 16px 36px;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 800;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      transition: all 0.25s ease;
+      box-shadow: 0 10px 30px var(--primary-glow);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 40px var(--primary-glow);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      padding: 16px 28px;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      backdrop-filter: blur(10px);
+      transition: all 0.25s ease;
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .apk-meta {
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    /* Features Grid */
+    .section-title {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .section-subtitle {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 16px;
+      margin-bottom: 50px;
+    }
+
+    .grid-features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+      margin-bottom: 80px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 30px;
+      backdrop-filter: blur(25px);
+      transition: transform 0.25s ease, border-color 0.25s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    .card-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+    .icon-gold { background: rgba(255, 215, 0, 0.15); border: 1px solid var(--primary); }
+    .icon-cyan { background: rgba(84, 197, 248, 0.15); border: 1px solid var(--cyan); }
+    .icon-pink { background: rgba(255, 72, 100, 0.15); border: 1px solid var(--pink); }
+
+    .card-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .card-desc {
+      color: var(--text-muted);
+      font-size: 14.5px;
+      line-height: 1.6;
+    }
+
+    /* Installation Steps */
+    .install-box {
+      background: linear-gradient(180deg, rgba(20, 22, 34, 0.9) 0%, rgba(12, 14, 21, 0.95) 100%);
+      border: 1px solid rgba(255, 215, 0, 0.3);
+      border-radius: 24px;
+      padding: 40px;
+      margin-bottom: 80px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    }
+
+    .install-steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 24px;
+      margin-top: 30px;
+    }
+
+    .step-item {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .step-num {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #000;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .step-text {
+      font-size: 14.5px;
+      color: var(--text);
+    }
+    .step-text strong {
+      display: block;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    /* Terminal & Build Code Box */
+    .code-box {
+      background: var(--code-bg);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 20px;
+      font-family: 'Fira Code', monospace;
+      font-size: 13.5px;
+      margin: 20px 0;
+      overflow-x: auto;
+      color: #a7f3d0;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 40px 0;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 640px) {
+      .install-box {
+        padding: 24px;
+      }
+      .cta-group {
+        flex-direction: column;
+        width: 100%;
+      }
+      .btn-primary, .btn-secondary {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Background Orbs -->
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <!-- Header -->
+  <header>
+    <div class="container" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+      <a href="#" class="brand">
+        <div class="brand-icon">🐛</div>
+        <div class="brand-name">Bug <span style="font-size: 14px; color: var(--primary); font-weight: 600;">(CodeSnap)</span></div>
+      </a>
+      <div class="nav-links">
+        <a href="#features" class="nav-link">Features</a>
+        <a href="#install" class="nav-link">Install APK</a>
+        <a href="#build" class="nav-link">Build from Source</a>
+        <a href="https://github.com" target="_blank" class="btn-nav-download">📥 Download APK</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="badge-pill">
+        <span class="badge-pulse"></span>
+        Zero-Cost Infrastructure · Live on Supabase
+      </div>
+      <h1 class="hero-title">
+        The Social Platform &amp; Mobile Workspace for <span class="gradient-text">Developers.</span>
+      </h1>
+      <p class="hero-desc">
+        Share code snippets, stream 24h stories, collaborate in real-time chats, and code directly on mobile with an integrated terminal and AI engine.
+      </p>
+
+      <div class="cta-group">
+        <!-- Direct APK Download Button -->
+        <a href="https://github.com" id="downloadApkBtn" class="btn-primary">
+          <span>📥</span> Download Android APK <span style="font-size: 13px; opacity: 0.8;">(v1.0.0 Free)</span>
+        </a>
+        <a href="#install" class="btn-secondary">
+          <span>📖</span> Installation Guide
+        </a>
+      </div>
+
+      <div class="apk-meta">
+        <span>✓ Android 8.0+</span>
+        <span>✓ Direct Installation (No Play Store required)</span>
+        <span>✓ 100% Free & Open Source</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section id="features" class="container" style="padding: 40px 24px;">
+    <h2 class="section-title">Engineered Without Compromises</h2>
+    <p class="section-subtitle">Everything running on \$0 infrastructure with maximum speed & reliability.</p>
+
+    <div class="grid-features">
+      <div class="card">
+        <div class="card-icon icon-gold">⚡</div>
+        <h3 class="card-title">Live Feed & 24h Stories</h3>
+        <p class="card-desc">
+          Publish rich syntax-highlighted code cards, share interactive moments, and browse developer stories that vanish after 24 hours.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon icon-cyan">💻</div>
+        <h3 class="card-title">Mobile & Desktop Workspace</h3>
+        <p class="card-desc">
+          Full VS Code experience on mobile: file tree explorer, multi-tab syntax editor, live HTML preview, and project cloud backup.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon icon-pink">🤖</div>
+        <h3 class="card-title">In-Workspace Terminal AI</h3>
+        <p class="card-desc">
+          Chat with the assistant right inside your files. Inspect errors, execute terminal commands, and click "Apply to Editor" with one tap.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon icon-gold">💬</div>
+        <h3 class="card-title">Real-Time Messaging</h3>
+        <p class="card-desc">
+          End-to-end instant messaging with code block formatting, custom liquid glass wallpapers, and Supabase real-time websocket sync.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon icon-cyan">☁️</div>
+        <h3 class="card-title">PostgreSQL on Supabase</h3>
+        <p class="card-desc">
+          Enterprise-grade PostgreSQL database, user authentication, row-level security (RLS), and automated profile triggers with zero monthly cost.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon icon-pink">🔔</div>
+        <h3 class="card-title">Interactive Notifications</h3>
+        <p class="card-desc">
+          Stay updated on likes, mentions, and comments. Swipe horizontally to dismiss and sync reads with the cloud instantly.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How to Install APK Guide -->
+  <section id="install" class="container">
+    <div class="install-box">
+      <h2 style="font-size: 26px; font-weight: 800; color: #fff;">📲 How to Install on Your Android Device</h2>
+      <p style="color: var(--text-muted); font-size: 14.5px; margin-top: 6px;">
+        Since you don't need to pay the Google Play Store fee, you can install the APK directly in 3 easy steps:
+      </p>
+
+      <div class="install-steps">
+        <div class="step-item">
+          <div class="step-num">1</div>
+          <div class="step-text">
+            <strong>Download the APK</strong>
+            Tap the "Download Android APK" button above to get the latest <code>.apk</code> release file on your phone.
+          </div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-num">2</div>
+          <div class="step-text">
+            <strong>Allow Unknown Apps</strong>
+            When prompted by Chrome or your File Manager, tap <em>Settings</em> and toggle <em>"Allow from this source"</em>.
+          </div>
+        </div>
+
+        <div class="step-item">
+          <div class="step-num">3</div>
+          <div class="step-text">
+            <strong>Install &amp; Launch Bug</strong>
+            Tap <em>Install</em>, open the app, register your account or use the demo offline mode, and start building!
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Build from Source Section -->
+  <section id="build" class="container" style="margin-bottom: 80px;">
+    <h2 class="section-title">Build Your Own APK Locally</h2>
+    <p class="section-subtitle">You can compile the production Android release directly from your terminal using Flutter:</p>
+
+    <div class="code-box">
+# 1. Clone your repository
+git clone https://github.com/your-username/codesnap.git
+cd codesnap
+
+# 2. Get dependencies
+flutter pub get
+
+# 3. Build optimized Release APK
+flutter build apk --release
+
+# The compiled APK is saved at:
+# build/app/outputs/flutter-apk/app-release.apk
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p>Built with Flutter &amp; Supabase · High Performance · 100% Free</p>
+      <p style="margin-top: 8px; font-size: 12.5px; opacity: 0.6;">Bug (CodeSnap) © 2026. Distributed under MIT License.</p>
+    </div>
+  </footer>
+
+</body>
+</html>

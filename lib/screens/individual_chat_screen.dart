@@ -10,6 +10,8 @@ import '../services/storage_picker.dart';
 import 'contact_info_screen.dart';
 import 'chat_screen.dart';
 import '../widgets/full_screen_media_viewer.dart';
+import '../services/supabase_service.dart';
+import '../services/supabase_data_service.dart';
 
 /// ─── Individual Chat Screen (Dedicated Page / Route) ────────────────────────
 /// Opened as a separate Navigator route on mobile/normal view so pressing the back
@@ -203,6 +205,12 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     store.notifyConversationsUpdated();
 
     _scrollToBottom();
+    if (SupabaseService.isAuthenticated && !widget.conversation.isAiAssistant) {
+      SupabaseDataService.sendMessage(
+        conversationId: widget.conversation.id,
+        text: text,
+      );
+    }
 
     if (widget.conversation.isAiAssistant || widget.conversation.id == 'server_terminal_ai') {
       _handleAiTerminalResponse(text);

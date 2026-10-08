@@ -11,6 +11,8 @@ import 'media_links_docs_screen.dart';
 import 'chat_settings_screen.dart';
 import '../services/storage_picker.dart';
 import 'individual_chat_screen.dart';
+import '../services/supabase_service.dart';
+import '../services/supabase_data_service.dart';
 
 /// ─── Chat Data Models ────────────────────────────────────────────────────────
 class ChatMessage {
@@ -548,6 +550,12 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     _msgCtrl.clear();
+    if (SupabaseService.isAuthenticated && _selectedConversationId != null) {
+      SupabaseDataService.sendMessage(
+        conversationId: _selectedConversationId!,
+        text: text,
+      );
+    }
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_messagesScrollCtrl.hasClients) {
         _messagesScrollCtrl.animateTo(

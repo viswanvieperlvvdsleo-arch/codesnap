@@ -19,6 +19,7 @@ dependencies:
   webview_flutter: ^4.7.0
   code_text_field: ^1.1.0
   highlight: ^0.7.0
+  supabase_flutter: ^2.8.0
 
 dev_dependencies:
   flutter_test:

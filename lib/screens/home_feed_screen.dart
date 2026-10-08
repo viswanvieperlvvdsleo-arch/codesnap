@@ -18,8 +18,14 @@ import '../screens/user_profile_detail_screen.dart';
 import '../utils/mock_data.dart';
 import '../services/storage_picker.dart';
 import '../services/saved_posts_manager.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
+import '../models/user.dart';
 import 'chat_screen.dart';
 import 'create_post_studio_screen.dart';
+import '../services/supabase_data_service.dart';
+import '../services/local_posts_cache.dart';
+import '../services/supabase_service.dart';
 
 class HomeFeedScreen extends StatefulWidget {
   const HomeFeedScreen({super.key});
@@ -29,11 +35,24 @@ class HomeFeedScreen extends StatefulWidget {
 }
 
 class _HomeFeedScreenState extends State<HomeFeedScreen>
-    with TickerProviderStateMixin {
-  final List<FeedStory> _stories = FeedMockData.getStories();
+    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  final List<FeedStory> _stories = [];
   final List<FeedStoryItem> _myStoryItems = [];
-  final List<FeedPost> _posts = FeedMockData.getPosts();
-  final List<PickedPost> _pickedPosts = FeedMockData.getPickedPosts();
+  List<FeedPost> _posts = [];
+  bool _isLoadingFeed = true;
+  List<PickedPost> get _pickedPosts => _posts
+      .take(6)
+      .map((p) => PickedPost(
+            id: p.id,
+            imageUrl: p.imageUrl,
+            avatarUrl: p.avatarUrl,
+            tag: p.captionTitle,
+            postsCount: '${p.likesCount} likes',
+          ))
+      .toList();
   final ScrollController _scrollController = ScrollController();
 
   int _activeFilterIndex = 0;
@@ -59,9 +78,9 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   final ValueNotifier<double> _scrollNotifier = ValueNotifier(0.0);
 
   // Per-post animation controllers for staggered entrance
-  late List<AnimationController> _postControllers;
-  late List<Animation<double>> _postFades;
-  late List<Animation<Offset>> _postSlides;
+  List<AnimationController> _postControllers = [];
+  List<Animation<double>> _postFades = [];
+  List<Animation<Offset>> _postSlides = [];
 
   // Filter chip spring controllers
   late List<AnimationController> _filterControllers;
@@ -103,6 +122,51 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
     );
 
     // Stagger post entrance
+    _loadUserLikes();
+    _reinitPostControllers();
+    _loadSupabasePosts();
+    _loadSupabaseStories();
+  }
+
+  Future<void> _loadUserLikes() async {
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final uid = auth.currentUser?.id;
+      if (uid != null) {
+        final likedIds =
+            await SupabaseDataService.fetchUserLikedPostIds(userId: uid);
+        if (mounted) {
+          setState(() {
+            _likedPosts.addAll(likedIds);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading user likes: $e');
+    }
+  }
+
+  void _reinitPostControllers() {
+    for (final c in _postControllers) {
+      c.dispose();
+    }
+    _postControllers = List.generate(
+      _posts.length,
+      (i) => AnimationController(
+        vsync: this,
+        duration: AppAnimations.expressive,
+      ),
+    );
+    _postFades = _postControllers
+        .map((c) => Tween<double>(begin: 0.0, end: 1.0)
+            .animate(CurvedAnimation(parent: c, curve: Curves.easeOut)))
+        .toList();
+    _postSlides = _postControllers
+        .map((c) =>
+            Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
+                .animate(CurvedAnimation(
+                    parent: c, curve: AppAnimations.expressiveEntrance)))
+        .toList();
     _launchPostEntrance();
   }
 
@@ -131,6 +195,222 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
       });
 
       await _launchPostEntrance();
+      await Future.wait([_loadSupabasePosts(), _loadSupabaseStories()]);
+    }
+  }
+
+  Future<void> _loadSupabasePosts() async {
+    try {
+      // 1. Immediately display cached local posts
+      final cachedPosts = await LocalPostsCache.loadPosts();
+      if (mounted && cachedPosts.isNotEmpty) {
+        setState(() {
+          final Set<String> existingIds = _posts.map((p) => p.id).toSet();
+          final newCached =
+              cachedPosts.where((cp) => !existingIds.contains(cp.id)).toList();
+          if (newCached.isNotEmpty) {
+            _posts = [...newCached, ..._posts];
+          }
+        });
+      }
+
+      await _syncPendingLocalPosts(cachedPosts);
+
+      final supaPosts = await SupabaseDataService.fetchPosts(limit: 30);
+      if (!mounted) return;
+      if (supaPosts.isEmpty) {
+        if (mounted) setState(() => _isLoadingFeed = false);
+        return;
+      }
+
+      final List<FeedPost> remotePosts = [];
+      for (final p in supaPosts) {
+        final profile = p['profiles'] as Map<String, dynamic>?;
+        final uname = profile?['username'] ?? 'developer';
+        final avatar = profile?['avatar_url'] ??
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500';
+        final snippet = p['code_snippet'] as String?;
+        final desc = p['description'] as String? ?? '';
+        final title = p['title'] as String? ?? 'Code Snippet';
+
+        final imageUrl = (snippet != null &&
+                (snippet.startsWith('http') ||
+                    snippet.startsWith('data:image') ||
+                    snippet.startsWith('blob:')))
+            ? snippet
+            : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200';
+
+        remotePosts.add(
+          FeedPost(
+            id: p['id'].toString(),
+            username: uname,
+            location: 'Tokyo Cloud',
+            avatarUrl: avatar,
+            imageUrl: imageUrl,
+            commentsCount: (p['comments_count'] as num?)?.toInt() ?? 0,
+            sharesCount: 0,
+            likesCount: (p['likes_count'] as num?)?.toInt() ?? 0,
+            captionTitle: title,
+            captionBody: desc.isNotEmpty ? desc : (snippet ?? ''),
+            musicTitle: 'Original Audio',
+            musicArtist: uname,
+            musicCoverUrl:
+                'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150',
+            likedByAvatars: [],
+            likedByText: '${(p['likes_count'] as num?)?.toInt() ?? 0} likes',
+          ),
+        );
+      }
+
+      if (mounted) {
+        setState(() {
+          final Set<String> remoteIds = remotePosts.map((rp) => rp.id).toSet();
+          final localUnsynced =
+              _posts.where((lp) => !remoteIds.contains(lp.id)).toList();
+          _posts = [...localUnsynced, ...remotePosts];
+          _isLoadingFeed = false;
+        });
+        _reinitPostControllers();
+      }
+    } catch (e) {
+      debugPrint('Error loading posts from Supabase: $e');
+      if (mounted) setState(() => _isLoadingFeed = false);
+    }
+  }
+
+  Future<void> _syncPendingLocalPosts(List<FeedPost> cachedPosts) async {
+    if (!SupabaseService.isAuthenticated) return;
+
+    final uuidPattern = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    );
+    for (final post in cachedPosts.where(
+      (item) => !uuidPattern.hasMatch(item.id),
+    )) {
+      final remoteId = SupabaseDataService.toValidUuid(post.id);
+      final result = await SupabaseDataService.createPost(
+        postId: remoteId,
+        title: post.captionTitle,
+        description: post.captionBody,
+        codeSnippet: post.imageUrl,
+        authorUsername: post.username,
+        authorFullName: post.username,
+        authorAvatar: post.avatarUrl,
+      );
+      if (result == null || result['id'] == null) continue;
+
+      final confirmedId = result['id'].toString();
+      await LocalPostsCache.updatePostId(post.id, confirmedId);
+      if (!mounted) return;
+      setState(() {
+        final index = _posts.indexWhere((item) => item.id == post.id);
+        if (index != -1) {
+          _posts[index] = _copyPostWithRemoteIdentity(
+            post,
+            id: confirmedId,
+            imageUrl: result['code_snippet']?.toString(),
+          );
+        }
+      });
+    }
+  }
+
+  FeedPost _copyPostWithRemoteIdentity(
+    FeedPost post, {
+    required String id,
+    String? imageUrl,
+  }) {
+    return FeedPost(
+      id: id,
+      username: post.username,
+      location: post.location,
+      avatarUrl: post.avatarUrl,
+      imageUrl: imageUrl ?? post.imageUrl,
+      commentsCount: post.commentsCount,
+      sharesCount: post.sharesCount,
+      likesCount: post.likesCount,
+      captionTitle: post.captionTitle,
+      captionBody: post.captionBody,
+      musicTitle: post.musicTitle,
+      musicArtist: post.musicArtist,
+      musicCoverUrl: post.musicCoverUrl,
+      likedByAvatars: post.likedByAvatars,
+      likedByText: post.likedByText,
+      isVideo: post.isVideo,
+      videoUrl: post.videoUrl,
+    );
+  }
+
+  Future<void> _loadSupabaseStories() async {
+    FeedStory? myStoryCard;
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final currentUser = auth.currentUser;
+      final myAvatar = (currentUser?.avatarUrl?.isNotEmpty == true)
+          ? currentUser!.avatarUrl
+          : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500';
+
+      myStoryCard = FeedStory(
+        id: 'my_story',
+        username: 'Your Story',
+        imageUrl: myAvatar,
+        timeAgo: 'Add',
+        isAddStory: true,
+        items: _myStoryItems,
+      );
+
+      final supaStories = await SupabaseDataService.fetchActiveStories();
+      if (!mounted) return;
+      if (supaStories.isEmpty) {
+        setState(() {
+          _stories.clear();
+          _stories.add(myStoryCard!);
+        });
+        return;
+      }
+
+      final List<FeedStory> remoteStories = [];
+      for (final s in supaStories) {
+        final profile = s['profiles'] as Map<String, dynamic>?;
+        final uname = profile?['username'] ?? 'developer';
+        final avatar = profile?['avatar_url'] ??
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500';
+        final media = s['media_url'] as String? ??
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500';
+        final title = s['title'] as String? ?? 'Story';
+
+        remoteStories.add(
+          FeedStory(
+            id: s['id'].toString(),
+            username: uname,
+            imageUrl: avatar,
+            timeAgo: 'Recent',
+            items: [
+              FeedStoryItem(
+                id: 'item_${s['id']}',
+                imageUrl: media,
+                caption: title,
+                time: 'Recent',
+              ),
+            ],
+          ),
+        );
+      }
+
+      if (mounted) {
+        setState(() {
+          _stories.clear();
+          _stories.add(myStoryCard!);
+          _stories.addAll(remoteStories);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading stories from Supabase: $e');
+      if (mounted && _stories.isEmpty && myStoryCard != null) {
+        setState(() {
+          _stories.add(myStoryCard!);
+        });
+      }
     }
   }
 
@@ -146,7 +426,16 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   void _triggerLike(FeedPost post) {
     final bool wasLiked = _likedPosts.contains(post.id);
     setState(() {
-      if (wasLiked) { _likedPosts.remove(post.id); } else { _likedPosts.add(post.id); }
+      if (wasLiked) {
+        _likedPosts.remove(post.id);
+        if (post.likesCount > 0) post.likesCount--;
+      } else {
+        _likedPosts.add(post.id);
+        post.likesCount++;
+      }
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final uid = auth.currentUser?.id;
+      SupabaseDataService.togglePostLike(post.id, userId: uid);
     });
     if (!wasLiked) {
       MorphingCapsule.show(
@@ -166,17 +455,24 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   }
 
   void _openUserProfile(FeedPost post) {
-    final user = MockData.getUserProfileForAuthor(
-      username: post.username,
+    final user = User(
+      id: post.id,
+      name: post.username,
+      email: '${post.username.toLowerCase()}@codesnap.com',
       avatarUrl: post.avatarUrl,
+      section: post.username,
+      headline: post.captionTitle,
+      bio: post.captionBody,
+      department: '',
       location: post.location,
+      skills: const [],
     );
     Navigator.of(context).push(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 320),
         reverseTransitionDuration: const Duration(milliseconds: 280),
         pageBuilder: (context, animation, secondaryAnimation) {
-          return UserProfileDetailScreen(user: user);
+          return UserProfileDetailScreen(user: user.toUserProfile());
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
@@ -230,7 +526,9 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
 
     setState(() {
       _activeActionPostId = post.id;
-      _activeActionIndex = ((details.localPosition.dx - left) / (barWidth / 6)).floor().clamp(0, 5);
+      _activeActionIndex = ((details.localPosition.dx - left) / (barWidth / 6))
+          .floor()
+          .clamp(0, 5);
       _activeActionBarWidth = barWidth;
       _actionBarPosition = Offset(left, top);
       _actionTouchPosition = details.localPosition;
@@ -274,7 +572,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
         });
         MorphingCapsule.show(
           context,
-          icon: nowSaved ? LucideIcons.bookmarkCheck : LucideIcons.bookmarkMinus,
+          icon:
+              nowSaved ? LucideIcons.bookmarkCheck : LucideIcons.bookmarkMinus,
           label: nowSaved ? 'Saved to Saved List!' : 'Removed from Saved',
           color: const Color(0xFFFFD700),
         );
@@ -291,7 +590,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             MorphingCapsule.show(
               context,
               icon: LucideIcons.checkCheck,
-              label: 'Saved to internal gallery (${post.isVideo ? "video.mp4" : "image.jpg"})',
+              label:
+                  'Saved to internal gallery (${post.isVideo ? "video.mp4" : "image.jpg"})',
               color: const Color(0xFF10B981),
             );
           }
@@ -331,7 +631,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
     setState(() => _activeActionPostId = null);
   }
 
-  void _openPostLongPressOptions(FeedPost post) { return;
+  void _openPostLongPressOptions(FeedPost post) {
+    return;
     final isLiked = _likedPosts.contains(post.id);
     final isSaved = SavedPostsManager.isSaved(post.id);
 
@@ -345,7 +646,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             padding: const EdgeInsets.fromLTRB(18, 14, 18, 24),
             decoration: BoxDecoration(
               color: const Color(0xFF0C0E17).withOpacity(0.96),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
               border: Border.all(color: Colors.white.withOpacity(0.18)),
             ),
             child: SafeArea(
@@ -372,7 +674,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                           width: 44,
                           height: 44,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(width: 44, height: 44, color: Colors.white12),
+                          errorBuilder: (_, __, ___) => Container(
+                              width: 44, height: 44, color: Colors.white12),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -384,14 +687,19 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                               post.captionTitle,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               'by @${post.username} · ${post.location}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 11.5),
+                              style: TextStyle(
+                                  color: Colors.white.withOpacity(0.6),
+                                  fontSize: 11.5),
                             ),
                           ],
                         ),
@@ -405,7 +713,9 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                     icon: isLiked ? LucideIcons.heartCrack : LucideIcons.heart,
                     iconColor: const Color(0xFFFF5252),
                     title: isLiked ? 'Unlike' : 'Like',
-                    subtitle: isLiked ? 'Remove like from this post' : 'Send appreciation to @${post.username}',
+                    subtitle: isLiked
+                        ? 'Remove like from this post'
+                        : 'Send appreciation to @${post.username}',
                     onTap: () {
                       Navigator.pop(ctx);
                       setState(() {
@@ -443,17 +753,22 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                     icon: LucideIcons.messageCircle,
                     iconColor: const Color(0xFF69F0AE),
                     title: 'Comments',
-                    subtitle: 'View and reply to ${post.commentsCount} comments',
+                    subtitle:
+                        'View and reply to ${post.commentsCount} comments',
                     onTap: () {
                       Navigator.pop(ctx);
                       _showCommentsCover(post);
                     },
                   ),
                   _buildFeedOptionTile(
-                    icon: isSaved ? LucideIcons.bookmarkCheck : LucideIcons.bookmark,
+                    icon: isSaved
+                        ? LucideIcons.bookmarkCheck
+                        : LucideIcons.bookmark,
                     iconColor: const Color(0xFFFFD700),
                     title: isSaved ? 'Remove from Saved' : 'Save to Saved List',
-                    subtitle: isSaved ? 'Remove from your saved list' : 'Keep in Settings -> Saved List',
+                    subtitle: isSaved
+                        ? 'Remove from your saved list'
+                        : 'Keep in Settings -> Saved List',
                     onTap: () {
                       Navigator.pop(ctx);
                       final nowSaved = SavedPostsManager.toggleSave(post);
@@ -466,8 +781,12 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                       });
                       MorphingCapsule.show(
                         context,
-                        icon: nowSaved ? LucideIcons.bookmarkCheck : LucideIcons.bookmarkMinus,
-                        label: nowSaved ? 'Saved to Saved List!' : 'Removed from Saved',
+                        icon: nowSaved
+                            ? LucideIcons.bookmarkCheck
+                            : LucideIcons.bookmarkMinus,
+                        label: nowSaved
+                            ? 'Saved to Saved List!'
+                            : 'Removed from Saved',
                         color: const Color(0xFFFFD700),
                       );
                     },
@@ -494,7 +813,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             final filtered = allConnections.where((c) {
               if (searchQuery.isEmpty) return true;
               final q = searchQuery.toLowerCase();
-              return c.name.toLowerCase().contains(q) || c.role.toLowerCase().contains(q);
+              return c.name.toLowerCase().contains(q) ||
+                  c.role.toLowerCase().contains(q);
             }).toList();
 
             return BackdropFilter(
@@ -506,7 +826,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                 padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0C0E17).withOpacity(0.96),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
                   border: Border.all(color: Colors.white.withOpacity(0.18)),
                 ),
                 child: SafeArea(
@@ -526,7 +847,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                       const SizedBox(height: 14),
                       Row(
                         children: [
-                          const Icon(LucideIcons.share2, color: Color(0xFF54C5F8), size: 18),
+                          const Icon(LucideIcons.share2,
+                              color: Color(0xFF54C5F8), size: 18),
                           const SizedBox(width: 8),
                           Text(
                             'Share to Connections',
@@ -545,7 +867,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                 shape: BoxShape.circle,
                                 color: Colors.white.withOpacity(0.08),
                               ),
-                              child: const Icon(LucideIcons.x, size: 16, color: Colors.white70),
+                              child: const Icon(LucideIcons.x,
+                                  size: 16, color: Colors.white70),
                             ),
                           ),
                         ],
@@ -557,22 +880,27 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white.withOpacity(0.14)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.14)),
                         ),
                         child: Row(
                           children: [
-                            const Icon(LucideIcons.search, size: 16, color: Colors.white54),
+                            const Icon(LucideIcons.search,
+                                size: 16, color: Colors.white54),
                             const SizedBox(width: 8),
                             Expanded(
                               child: TextField(
                                 onChanged: (val) {
                                   setSheetState(() => searchQuery = val);
                                 },
-                                style: const TextStyle(color: Colors.white, fontSize: 13),
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 13),
                                 cursorColor: const Color(0xFF54C5F8),
                                 decoration: InputDecoration(
                                   hintText: 'Search connections or friends...',
-                                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 13),
+                                  hintStyle: TextStyle(
+                                      color: Colors.white.withOpacity(0.45),
+                                      fontSize: 13),
                                   border: InputBorder.none,
                                   isDense: true,
                                 ),
@@ -587,32 +915,40 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                             ? Center(
                                 child: Text(
                                   'No matching connections found',
-                                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+                                  style: TextStyle(
+                                      color: Colors.white.withOpacity(0.5),
+                                      fontSize: 13),
                                 ),
                               )
                             : ListView.separated(
                                 physics: const BouncingScrollPhysics(),
                                 itemCount: filtered.length,
-                                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 8),
                                 itemBuilder: (context, i) {
                                   final conn = filtered[i];
                                   return Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 8),
                                     decoration: BoxDecoration(
                                       color: Colors.white.withOpacity(0.05),
                                       borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(color: Colors.white.withOpacity(0.08)),
+                                      border: Border.all(
+                                          color:
+                                              Colors.white.withOpacity(0.08)),
                                     ),
                                     child: Row(
                                       children: [
                                         CircleAvatar(
                                           radius: 18,
-                                          backgroundImage: NetworkImage(conn.avatarUrl),
+                                          backgroundImage:
+                                              NetworkImage(conn.avatarUrl),
                                         ),
                                         const SizedBox(width: 12),
                                         Expanded(
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               Text(
                                                 conn.name,
@@ -625,7 +961,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                               Text(
                                                 conn.role,
                                                 style: TextStyle(
-                                                  color: Colors.white.withOpacity(0.5),
+                                                  color: Colors.white
+                                                      .withOpacity(0.5),
                                                   fontSize: 11,
                                                 ),
                                               ),
@@ -637,32 +974,45 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                             conn.messages.add(
                                               ChatMessage(
                                                 id: 'share_${DateTime.now().millisecondsSinceEpoch}',
-                                                text: 'Shared a post from @${post.username}: "${post.captionTitle}"',
+                                                text:
+                                                    'Shared a post from @${post.username}: "${post.captionTitle}"',
                                                 isMe: true,
                                                 time: 'Just now',
                                                 sentAt: DateTime.now(),
                                                 mediaUrl: post.imageUrl,
                                                 mediaType: 'image',
-                                                mediaCaption: '${post.captionTitle}\nby @${post.username}',
+                                                mediaCaption:
+                                                    '${post.captionTitle}\nby @${post.username}',
                                               ),
                                             );
-                                            conn.lastMessage = 'Shared a post from @${post.username}';
+                                            conn.lastMessage =
+                                                'Shared a post from @${post.username}';
                                             Navigator.pop(ctx);
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text('Post shared with ${conn.name}!')),
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
+                                              SnackBar(
+                                                  content: Text(
+                                                      'Post shared with ${conn.name}!')),
                                             );
                                           },
                                           child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 14, vertical: 7),
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFF54C5F8).withOpacity(0.20),
-                                              borderRadius: BorderRadius.circular(10),
-                                              border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.6)),
+                                              color: const Color(0xFF54C5F8)
+                                                  .withOpacity(0.20),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                              border: Border.all(
+                                                  color: const Color(0xFF54C5F8)
+                                                      .withOpacity(0.6)),
                                             ),
                                             child: const Row(
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                Icon(LucideIcons.send, color: Color(0xFF54C5F8), size: 13),
+                                                Icon(LucideIcons.send,
+                                                    color: Color(0xFF54C5F8),
+                                                    size: 13),
                                                 SizedBox(width: 6),
                                                 Text(
                                                   'Send',
@@ -728,17 +1078,22 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.55), fontSize: 11),
                   ),
                 ],
               ),
             ),
-            Icon(LucideIcons.chevronRight, size: 16, color: Colors.white.withOpacity(0.35)),
+            Icon(LucideIcons.chevronRight,
+                size: 16, color: Colors.white.withOpacity(0.35)),
           ],
         ),
       ),
@@ -748,32 +1103,37 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   final Map<String, List<CommentItem>> _feedPostComments = {};
 
   List<CommentItem> _getCommentsForPost(FeedPost post) {
-    return _feedPostComments.putIfAbsent(post.id, () => [
-      CommentItem(
-        id: 'c1_${post.id}',
-        username: 'elena.codes',
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop',
-        text: 'The composition and lighting here is unreal! 😍',
-        timestamp: '2h',
-        likesCount: 24,
-      ),
-      CommentItem(
-        id: 'c2_${post.id}',
-        username: 'marcus_dev',
-        avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop',
-        text: 'Clean aesthetic, looks super crisp.',
-        timestamp: '1h',
-        likesCount: 9,
-      ),
-      CommentItem(
-        id: 'c3_${post.id}',
-        username: 'sophia_ai',
-        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop',
-        text: 'Amazing shot! Love the colors. 💛',
-        timestamp: '35m',
-        likesCount: 14,
-      ),
-    ]);
+    return _feedPostComments.putIfAbsent(
+        post.id,
+        () => [
+              CommentItem(
+                id: 'c1_${post.id}',
+                username: 'elena.codes',
+                avatarUrl:
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop',
+                text: 'The composition and lighting here is unreal! 😍',
+                timestamp: '2h',
+                likesCount: 24,
+              ),
+              CommentItem(
+                id: 'c2_${post.id}',
+                username: 'marcus_dev',
+                avatarUrl:
+                    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop',
+                text: 'Clean aesthetic, looks super crisp.',
+                timestamp: '1h',
+                likesCount: 9,
+              ),
+              CommentItem(
+                id: 'c3_${post.id}',
+                username: 'sophia_ai',
+                avatarUrl:
+                    'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop',
+                text: 'Amazing shot! Love the colors. 💛',
+                timestamp: '35m',
+                likesCount: 14,
+              ),
+            ]);
   }
 
   void _showCommentsCover(FeedPost post) {
@@ -807,7 +1167,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                 ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0C0E17).withOpacity(0.96),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
                   border: Border.all(color: Colors.white.withOpacity(0.18)),
                 ),
                 child: SafeArea(
@@ -834,7 +1195,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                           children: [
                             Row(
                               children: [
-                                const Icon(LucideIcons.messageCircle, color: Color(0xFFFFD700), size: 18),
+                                const Icon(LucideIcons.messageCircle,
+                                    color: Color(0xFFFFD700), size: 18),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Comments (${comments.length})',
@@ -847,7 +1209,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                               ],
                             ),
                             IconButton(
-                              icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                              icon: const Icon(LucideIcons.x,
+                                  color: Colors.white70, size: 20),
                               onPressed: () => Navigator.pop(ctx),
                             ),
                           ],
@@ -856,7 +1219,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                       Divider(color: Colors.white.withOpacity(0.1), height: 1),
                       Expanded(
                         child: ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
                           itemCount: comments.length,
                           itemBuilder: (context, index) {
                             final comment = comments[index];
@@ -867,13 +1231,15 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                 children: [
                                   CircleAvatar(
                                     radius: 17,
-                                    backgroundImage: NetworkImage(comment.avatarUrl),
+                                    backgroundImage:
+                                        NetworkImage(comment.avatarUrl),
                                     backgroundColor: Colors.white12,
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Row(
                                           children: [
@@ -889,7 +1255,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                             Text(
                                               comment.timestamp,
                                               style: TextStyle(
-                                                color: Colors.white.withOpacity(0.45),
+                                                color: Colors.white
+                                                    .withOpacity(0.45),
                                                 fontSize: 11,
                                               ),
                                             ),
@@ -914,7 +1281,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                           child: Text(
                                             'Reply',
                                             style: TextStyle(
-                                              color: Colors.white.withOpacity(0.6),
+                                              color:
+                                                  Colors.white.withOpacity(0.6),
                                               fontSize: 11.5,
                                               fontWeight: FontWeight.w600,
                                             ),
@@ -927,7 +1295,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                     onTap: () {
                                       setSheetState(() {
                                         comment.isLiked = !comment.isLiked;
-                                        comment.likesCount += comment.isLiked ? 1 : -1;
+                                        comment.likesCount +=
+                                            comment.isLiked ? 1 : -1;
                                       });
                                     },
                                     child: Column(
@@ -936,14 +1305,18 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                         Icon(
                                           LucideIcons.heart,
                                           size: 15,
-                                          color: comment.isLiked ? const Color(0xFFFF5252) : Colors.white38,
+                                          color: comment.isLiked
+                                              ? const Color(0xFFFF5252)
+                                              : Colors.white38,
                                         ),
                                         if (comment.likesCount > 0) ...[
                                           const SizedBox(height: 2),
                                           Text(
                                             '${comment.likesCount}',
                                             style: TextStyle(
-                                              color: comment.isLiked ? const Color(0xFFFF5252) : Colors.white38,
+                                              color: comment.isLiked
+                                                  ? const Color(0xFFFF5252)
+                                                  : Colors.white38,
                                               fontSize: 10,
                                             ),
                                           ),
@@ -959,18 +1332,22 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                       ),
                       if (replyingTo != null)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 6),
                           color: Colors.white.withOpacity(0.06),
                           child: Row(
                             children: [
                               Text(
                                 'Replying to @$replyingTo',
-                                style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 12),
+                                style: const TextStyle(
+                                    color: Color(0xFF54C5F8), fontSize: 12),
                               ),
                               const Spacer(),
                               GestureDetector(
-                                onTap: () => setSheetState(() => replyingTo = null),
-                                child: const Icon(LucideIcons.x, size: 14, color: Colors.white60),
+                                onTap: () =>
+                                    setSheetState(() => replyingTo = null),
+                                child: const Icon(LucideIcons.x,
+                                    size: 14, color: Colors.white60),
                               ),
                             ],
                           ),
@@ -979,32 +1356,54 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                         padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.4),
-                          border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
+                          border: Border(
+                              top: BorderSide(
+                                  color: Colors.white.withOpacity(0.1))),
                         ),
                         child: Row(
                           children: [
-                            const CircleAvatar(
+                            CircleAvatar(
                               radius: 15,
-                              backgroundImage: NetworkImage('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'),
+                              backgroundImage: NetworkImage(
+                                context
+                                            .watch<AuthProvider>()
+                                            .currentUser
+                                            ?.avatarUrl
+                                            .isNotEmpty ==
+                                        true
+                                    ? context
+                                        .watch<AuthProvider>()
+                                        .currentUser!
+                                        .avatarUrl
+                                    : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+                              ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.08),
                                   borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: Colors.white.withOpacity(0.18)),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.18)),
                                 ),
                                 child: TextField(
                                   controller: textCtrl,
-                                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 13),
                                   decoration: InputDecoration(
-                                    hintText: replyingTo != null ? 'Reply to @$replyingTo...' : 'Add a comment...',
-                                    hintStyle: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 13),
+                                    hintText: replyingTo != null
+                                        ? 'Reply to @$replyingTo...'
+                                        : 'Add a comment...',
+                                    hintStyle: TextStyle(
+                                        color: Colors.white.withOpacity(0.45),
+                                        fontSize: 13),
                                     border: InputBorder.none,
                                     isDense: true,
-                                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                                    contentPadding:
+                                        const EdgeInsets.symmetric(vertical: 8),
                                   ),
                                 ),
                               ),
@@ -1014,13 +1413,28 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                               onTap: () {
                                 final text = textCtrl.text.trim();
                                 if (text.isEmpty) return;
+                                final auth = Provider.of<AuthProvider>(context,
+                                    listen: false);
+                                final user = auth.currentUser;
+                                final String myUname =
+                                    (user?.section?.isNotEmpty == true)
+                                        ? user!.section!
+                                        : (user?.name ?? 'You');
+                                final myAvatar = (user?.avatarUrl?.isNotEmpty ==
+                                        true)
+                                    ? user!.avatarUrl
+                                    : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150';
+                                SupabaseDataService.addComment(
+                                    postId: post.id,
+                                    content: text,
+                                    userId: user?.id);
                                 setSheetState(() {
                                   comments.insert(
                                     0,
                                     CommentItem(
                                       id: 'c_${DateTime.now().millisecondsSinceEpoch}',
-                                      username: 'You',
-                                      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+                                      username: myUname,
+                                      avatarUrl: myAvatar,
                                       text: text,
                                       timestamp: 'Just now',
                                       replyTo: replyingTo,
@@ -1037,7 +1451,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                   color: Color(0xFFFFD700),
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(LucideIcons.send, size: 14, color: Colors.black),
+                                child: const Icon(LucideIcons.send,
+                                    size: 14, color: Colors.black),
                               ),
                             ),
                           ],
@@ -1073,7 +1488,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
             decoration: BoxDecoration(
               color: const Color(0xFF0C0E17).withOpacity(0.96),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
               border: Border.all(color: Colors.white.withOpacity(0.18)),
             ),
             child: SafeArea(
@@ -1097,7 +1513,9 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                     children: [
                       CircleAvatar(
                         radius: 20,
-                        backgroundImage: NetworkImage(post.avatarUrl),
+                        backgroundImage: post.avatarUrl.isNotEmpty
+                            ? NetworkImage(post.avatarUrl)
+                            : null,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -1123,7 +1541,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                        icon: const Icon(LucideIcons.x,
+                            color: Colors.white70, size: 20),
                         onPressed: () => Navigator.pop(ctx),
                       ),
                     ],
@@ -1150,7 +1569,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                   ),
                   const SizedBox(height: 16),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.06),
                       borderRadius: BorderRadius.circular(12),
@@ -1158,12 +1578,14 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                     ),
                     child: Row(
                       children: [
-                        const Icon(LucideIcons.music, size: 14, color: Color(0xFFFFD700)),
+                        const Icon(LucideIcons.music,
+                            size: 14, color: Color(0xFFFFD700)),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             '${post.musicTitle} • ${post.musicArtist}',
-                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 12),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1209,6 +1631,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             FullScreenReelsScreen(
           posts: _posts,
           initialIndex: initialIndex,
+          initialLikedPostIds: _likedPosts,
+          onLikeToggled: (post) => _triggerLike(post),
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
@@ -1219,6 +1643,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       backgroundColor: ThemeProvider.backgroundWarmWhite,
       body: CustomScrollView(
@@ -1236,12 +1661,81 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             pinned: true,
             delegate: _FilterTabsDelegate(child: _buildFilterTabs()),
           ),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _buildPostCard(_posts[index], index),
-              childCount: _posts.length,
+          if (_isLoadingFeed)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 60),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: Color(0xFF54C5F8),
+                    strokeWidth: 2.5,
+                  ),
+                ),
+              ),
+            )
+          else if (_posts.isEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.06),
+                          shape: BoxShape.circle,
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.12)),
+                        ),
+                        child: const Icon(LucideIcons.code2,
+                            color: Color(0xFF54C5F8), size: 36),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'No Posts in Live Feed',
+                        style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Be the first to share code snippets, projects, or moments to Supabase!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.6), fontSize: 13),
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF54C5F8),
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                        ),
+                        onPressed: _openPostMomentSheet,
+                        icon: const Icon(LucideIcons.plus, size: 18),
+                        label: const Text('Create First Post',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _buildPostCard(_posts[index], index),
+                childCount: _posts.length,
+              ),
             ),
-          ),
           const SliverToBoxAdapter(
             child: SizedBox(height: 100),
           ),
@@ -1289,7 +1783,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                    icon: const Icon(LucideIcons.x,
+                        color: Colors.white70, size: 20),
                     onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
@@ -1306,9 +1801,12 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                         Navigator.pop(ctx);
                         final result = await getStoragePicker().pickImage();
                         if (result != null) {
-                          _promptDestinationAndOpenStudio(result.pathOrDataUrl, isVideo: false);
+                          _promptDestinationAndOpenStudio(result.pathOrDataUrl,
+                              isVideo: false);
                         } else {
-                          _promptDestinationAndOpenStudio('https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=800', isVideo: false);
+                          _promptDestinationAndOpenStudio(
+                              'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=800',
+                              isVideo: false);
                         }
                       },
                     ),
@@ -1323,9 +1821,12 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                         Navigator.pop(ctx);
                         final result = await getStoragePicker().pickVideo();
                         if (result != null) {
-                          _promptDestinationAndOpenStudio(result.pathOrDataUrl, isVideo: true);
+                          _promptDestinationAndOpenStudio(result.pathOrDataUrl,
+                              isVideo: true);
                         } else {
-                          _promptDestinationAndOpenStudio('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800', isVideo: true);
+                          _promptDestinationAndOpenStudio(
+                              'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
+                              isVideo: true);
                         }
                         // Video moment handled above
                         // dead
@@ -1410,7 +1911,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
         ),
         title: Text(
           'Post Status Update',
-          style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w700),
+          style: GoogleFonts.inter(
+              color: Colors.white, fontWeight: FontWeight.w700),
         ),
         content: TextField(
           controller: statusCtrl,
@@ -1431,12 +1933,14 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            child:
+                const Text('Cancel', style: TextStyle(color: Colors.white60)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: ThemeProvider.primaryGold,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: () {
               final text = statusCtrl.text.trim();
@@ -1448,14 +1952,17 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                 );
               }
             },
-            child: const Text('Post', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w700)),
+            child: const Text('Post',
+                style: TextStyle(
+                    color: Colors.black, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
     );
   }
 
-  void _promptDestinationAndOpenStudio(String mediaUrl, {required bool isVideo}) {
+  void _promptDestinationAndOpenStudio(String mediaUrl,
+      {required bool isVideo}) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1466,7 +1973,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
             decoration: BoxDecoration(
               color: const Color(0xFF0F111A).withOpacity(0.96),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
               border: Border.all(color: Colors.white.withOpacity(0.16)),
             ),
             child: Column(
@@ -1492,7 +2000,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                 const SizedBox(height: 6),
                 Text(
                   'Choose where you want to share this media',
-                  style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13),
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.6), fontSize: 13),
                 ),
                 const SizedBox(height: 20),
                 SpringButton(
@@ -1509,7 +2018,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.06),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.35)),
+                      border: Border.all(
+                          color: const Color(0xFFFFD700).withOpacity(0.35)),
                     ),
                     child: Row(
                       children: [
@@ -1518,9 +2028,12 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: const Color(0xFFFFD700).withOpacity(0.18),
-                            border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.4)),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFFFFD700).withOpacity(0.4)),
                           ),
-                          child: const Icon(LucideIcons.circleDot, color: Color(0xFFFFD700), size: 20),
+                          child: const Icon(LucideIcons.circleDot,
+                              color: Color(0xFFFFD700), size: 20),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -1546,7 +2059,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                             ],
                           ),
                         ),
-                        const Icon(LucideIcons.chevronRight, color: Colors.white38, size: 18),
+                        const Icon(LucideIcons.chevronRight,
+                            color: Colors.white38, size: 18),
                       ],
                     ),
                   ),
@@ -1566,7 +2080,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.06),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+                      border: Border.all(
+                          color: const Color(0xFF54C5F8).withOpacity(0.35)),
                     ),
                     child: Row(
                       children: [
@@ -1575,9 +2090,12 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: const Color(0xFF54C5F8).withOpacity(0.18),
-                            border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.4)),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFF54C5F8).withOpacity(0.4)),
                           ),
-                          child: const Icon(LucideIcons.layoutGrid, color: Color(0xFF54C5F8), size: 20),
+                          child: const Icon(LucideIcons.layoutGrid,
+                              color: Color(0xFF54C5F8), size: 20),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -1603,7 +2121,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                             ],
                           ),
                         ),
-                        const Icon(LucideIcons.chevronRight, color: Colors.white38, size: 18),
+                        const Icon(LucideIcons.chevronRight,
+                            color: Colors.white38, size: 18),
                       ],
                     ),
                   ),
@@ -1636,7 +2155,16 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             required String? description,
             required String? location,
             required String? musicTitle,
-          }) {
+          }) async {
+            final auth = Provider.of<AuthProvider>(context, listen: false);
+            final user = auth.currentUser;
+            final String myUname = (user?.section?.isNotEmpty == true)
+                ? user!.section!
+                : (user?.name ?? 'You');
+            final myAvatar = (user?.avatarUrl?.isNotEmpty == true)
+                ? user!.avatarUrl
+                : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500';
+
             if (destination == PostDestination.story) {
               final newItem = FeedStoryItem(
                 id: 'my_item_${DateTime.now().millisecondsSinceEpoch}',
@@ -1651,18 +2179,28 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                   _stories.first.items.addAll(_myStoryItems);
                 }
               });
+              final storySaved = await SupabaseDataService.createStory(
+                title: caption ?? 'Story moment',
+                mediaUrl: mediaUrl,
+                userId: user?.id,
+                authorUsername: myUname,
+                authorFullName: user?.name ?? myUname,
+                authorAvatar: myAvatar,
+              );
               MorphingCapsule.show(
                 context,
-                icon: LucideIcons.sparkles,
-                label: 'Story published to your card!',
-                color: ThemeProvider.primaryGold,
+                icon: storySaved ? LucideIcons.sparkles : LucideIcons.cloudOff,
+                label: storySaved
+                    ? 'Story published to Supabase!'
+                    : 'Story is local only. Check your connection and retry.',
+                color: storySaved ? ThemeProvider.primaryGold : Colors.orange,
               );
             } else {
               final newPost = FeedPost(
                 id: 'post_${DateTime.now().millisecondsSinceEpoch}',
-                username: 'You',
-                location: location ?? 'San Francisco, CA',
-                avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+                username: myUname,
+                location: location ?? 'Tokyo Cloud',
+                avatarUrl: myAvatar,
                 imageUrl: mediaUrl,
                 commentsCount: 0,
                 sharesCount: 0,
@@ -1670,15 +2208,47 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                 captionTitle: title ?? 'Fresh Upload',
                 captionBody: description ?? 'Check out this new feed post!',
                 musicTitle: musicTitle ?? 'Original Audio',
-                musicArtist: 'You',
-                musicCoverUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150',
+                musicArtist: myUname,
+                musicCoverUrl:
+                    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150',
                 likedByAvatars: [],
                 likedByText: 'Be the first to like this',
               );
 
+              await LocalPostsCache.savePost(newPost);
               setState(() {
                 _posts.insert(0, newPost);
+                _reinitPostControllers();
               });
+              final remoteId = SupabaseDataService.toValidUuid(newPost.id);
+              final result = await SupabaseDataService.createPost(
+                postId: remoteId,
+                title: title,
+                description: description ?? '',
+                codeSnippet: mediaUrl,
+                userId: user?.id,
+                authorUsername: myUname,
+                authorFullName: user?.name ?? myUname,
+                authorAvatar: myAvatar,
+              );
+
+              if (result != null && result['id'] != null && mounted) {
+                final confirmedId = result['id'].toString();
+                await LocalPostsCache.updatePostId(newPost.id, confirmedId);
+                if (!mounted) return;
+                setState(() {
+                  final index = _posts.indexWhere(
+                    (item) => item.id == newPost.id,
+                  );
+                  if (index != -1) {
+                    _posts[index] = _copyPostWithRemoteIdentity(
+                      newPost,
+                      id: confirmedId,
+                      imageUrl: result['code_snippet']?.toString(),
+                    );
+                  }
+                });
+              }
 
               if (_scrollController.hasClients) {
                 _scrollController.animateTo(
@@ -1690,9 +2260,14 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
 
               MorphingCapsule.show(
                 context,
-                icon: LucideIcons.checkCheck,
-                label: 'Post published to Feed!',
-                color: ThemeProvider.primaryGold,
+                icon: result != null
+                    ? LucideIcons.checkCheck
+                    : LucideIcons.cloudOff,
+                label: result != null
+                    ? 'Post published to Supabase!'
+                    : 'Saved locally. Supabase sync will retry automatically.',
+                color:
+                    result != null ? ThemeProvider.primaryGold : Colors.orange,
               );
             }
           },
@@ -1738,7 +2313,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
 
     return Container(
       color: ThemeProvider.backgroundWarmWhite,
-      padding: EdgeInsets.only(top: isDesktop ? 14 : 20, bottom: isDesktop ? 8 : 12),
+      padding:
+          EdgeInsets.only(top: isDesktop ? 14 : 20, bottom: isDesktop ? 8 : 12),
       clipBehavior: Clip.none,
       child: SizedBox(
         height: storiesHeight,
@@ -1750,7 +2326,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
               controller: _storyScrollController,
               scrollDirection: Axis.horizontal,
               physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.only(left: 12, right: 12, top: 12, bottom: 8),
+              padding: const EdgeInsets.only(
+                  left: 12, right: 12, top: 12, bottom: 8),
               itemCount: _stories.length,
               itemBuilder: (context, index) {
                 // Liquid wave math: calculate distance from center of screen
@@ -1767,7 +2344,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
 
                 return Transform.translate(
                   offset: Offset(0, -waveOffset),
-                  child: _buildStoryCard(_stories[index], index, storyCardWidth),
+                  child:
+                      _buildStoryCard(_stories[index], index, storyCardWidth),
                 );
               },
             );
@@ -1790,27 +2368,27 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
         onTap: () {
           if (!story.isAddStory) {
             final userStories = _stories.where((s) => !s.isAddStory).toList();
-            final initialIdx = userStories.indexOf(story).clamp(0, userStories.length - 1);
+            final initialIdx =
+                userStories.indexOf(story).clamp(0, userStories.length - 1);
             Navigator.push(
               context,
               PageRouteBuilder(
                 pageBuilder: (context, animation, secondaryAnimation) =>
                     StoryViewerScreen(
-                      allStories: userStories,
-                      initialStoryIndex: initialIdx,
-                      onCompleted: () {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) {
-                            setState(() {
-                              story.isViewed = true;
-                              _stories.remove(story);
-                              _stories.add(story);
-                            });
-                          }
+                  allStories: userStories,
+                  initialStoryIndex: initialIdx,
+                  onCompleted: () {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) {
+                        setState(() {
+                          story.isViewed = true;
+                          _stories.remove(story);
+                          _stories.add(story);
                         });
-                      },
-                    ),
-
+                      }
+                    });
+                  },
+                ),
                 transitionsBuilder:
                     (context, animation, secondaryAnimation, child) {
                   return SlideTransition(
@@ -1869,7 +2447,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             border: story.isAddStory
                 ? (_myStoryItems.isNotEmpty
                     ? Border.all(color: const Color(0xFFFFD700), width: 1.8)
-                    : Border.all(color: Colors.white.withOpacity(0.12), width: 1.2))
+                    : Border.all(
+                        color: Colors.white.withOpacity(0.12), width: 1.2))
                 : story.isViewed
                     ? Border.all(
                         color: Colors.white.withOpacity(0.18),
@@ -1909,7 +2488,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
 
   Widget _buildAddStoryCard(FeedStory story) {
     final bool hasMyStory = _myStoryItems.isNotEmpty;
-    final String displayUrl = hasMyStory ? _myStoryItems.last.imageUrl : story.imageUrl;
+    final String displayUrl =
+        hasMyStory ? _myStoryItems.last.imageUrl : story.imageUrl;
 
     return Stack(
       fit: StackFit.expand,
@@ -1919,7 +2499,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Container(
             color: const Color(0xFF1B1D26),
-            child: const Icon(LucideIcons.user, color: Colors.white38, size: 36),
+            child:
+                const Icon(LucideIcons.user, color: Colors.white38, size: 36),
           ),
         ),
         Container(
@@ -1959,7 +2540,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                   ),
                 ],
               ),
-              child: const Icon(LucideIcons.plus, color: Colors.black, size: 18),
+              child:
+                  const Icon(LucideIcons.plus, color: Colors.black, size: 18),
             ),
           ),
         ),
@@ -2200,14 +2782,11 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             vertical: 8,
           ),
           decoration: BoxDecoration(
-            color: isActive
-                ? Colors.white.withOpacity(0.15)
-                : Colors.transparent,
+            color:
+                isActive ? Colors.white.withOpacity(0.15) : Colors.transparent,
             borderRadius: BorderRadius.circular(100),
             border: isActive
-                ? Border.all(
-                    color: Colors.white.withOpacity(0.3),
-                    width: 1.5)
+                ? Border.all(color: Colors.white.withOpacity(0.3), width: 1.5)
                 : null,
             boxShadow: isActive
                 ? [
@@ -2228,9 +2807,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                   width: 20,
                   height: 20,
                   decoration: BoxDecoration(
-                    color: isActive
-                        ? Colors.white
-                        : Colors.white.withOpacity(0.2),
+                    color:
+                        isActive ? Colors.white : Colors.white.withOpacity(0.2),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(LucideIcons.plus,
@@ -2243,7 +2821,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                   width: 20,
                   height: 20,
                   decoration: BoxDecoration(
-                    color: isActive ? Colors.white : Colors.white.withOpacity(0.3),
+                    color:
+                        isActive ? Colors.white : Colors.white.withOpacity(0.3),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -2252,9 +2831,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
               AnimatedDefaultTextStyle(
                 duration: AppAnimations.quick,
                 style: GoogleFonts.inter(
-                  color: isActive
-                      ? Colors.white
-                      : ThemeProvider.textMutedGray,
+                  color: isActive ? Colors.white : ThemeProvider.textMutedGray,
                   fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
                   fontSize: 14,
                 ),
@@ -2277,14 +2854,20 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   Widget _buildPostCard(FeedPost post, int index) {
     final bool isLiked = _likedPosts.contains(post.id);
     final bool isSaved = _savedPosts.contains(post.id);
-    final int visibleLikes = post.likesCount + (isLiked ? 1 : 0);
+    final int visibleLikes = post.likesCount;
 
     return AnimatedBuilder(
-      animation: _postControllers[index],
+      animation: index < _postControllers.length
+          ? _postControllers[index]
+          : const AlwaysStoppedAnimation(1.0),
       builder: (context, child) => FadeTransition(
-        opacity: _postFades[index],
+        opacity: index < _postFades.length
+            ? _postFades[index]
+            : const AlwaysStoppedAnimation(1.0),
         child: SlideTransition(
-          position: _postSlides[index],
+          position: index < _postSlides.length
+              ? _postSlides[index]
+              : const AlwaysStoppedAnimation(Offset.zero),
           child: child,
         ),
       ),
@@ -2344,18 +2927,13 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                     onLongPressEnd: (_) => _finishQuickActions(post),
                     onLongPressCancel: () =>
                         setState(() => _activeActionPostId = null),
-
-
-
-
-
                     child: Stack(
                       children: [
                         // Full-width image cover
                         Positioned.fill(
                           child: Image.network(
                             post.imageUrl,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             errorBuilder: (_, __, ___) => Container(
                               color: const Color(0xFF1A1A1A),
                               child: const Icon(Icons.image,
@@ -2401,7 +2979,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                         ),
 
                         // Video Central Pause Indicator
-                        if (post.isVideo && _pausedVideoPostIds.contains(post.id))
+                        if (post.isVideo &&
+                            _pausedVideoPostIds.contains(post.id))
                           Positioned.fill(
                             child: Center(
                               child: Container(
@@ -2409,7 +2988,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                 decoration: BoxDecoration(
                                   color: Colors.black.withOpacity(0.55),
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white30, width: 2),
+                                  border: Border.all(
+                                      color: Colors.white30, width: 2),
                                 ),
                                 child: const Icon(
                                   LucideIcons.pause,
@@ -2441,7 +3021,9 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                   ),
                                   child: CircleAvatar(
                                     radius: 17,
-                                    backgroundImage: NetworkImage(post.avatarUrl),
+                                    backgroundImage: post.avatarUrl.isNotEmpty
+                                        ? NetworkImage(post.avatarUrl)
+                                        : null,
                                   ),
                                 ),
                               ),
@@ -2451,34 +3033,35 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                   behavior: HitTestBehavior.opaque,
                                   onTap: () => _openUserProfile(post),
                                   child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Text(post.username,
-                                            style: GoogleFonts.inter(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 14)),
-                                        const SizedBox(width: 4),
-                                        const Icon(Icons.verified,
-                                            color: Colors.white, size: 13),
-                                      ],
-                                    ),
-                                    Row(
-                                      children: [
-                                        const Icon(LucideIcons.mapPin,
-                                            color: Colors.white70, size: 11),
-                                        const SizedBox(width: 4),
-                                        Text(post.location,
-                                            style: GoogleFonts.inter(
-                                                color:
-                                                    Colors.white.withOpacity(0.7),
-                                                fontSize: 11)),
-                                      ],
-                                    ),
-                                  ],
-                                ),
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Text(post.username,
+                                              style: GoogleFonts.inter(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: 14)),
+                                          const SizedBox(width: 4),
+                                          const Icon(Icons.verified,
+                                              color: Colors.white, size: 13),
+                                        ],
+                                      ),
+                                      Row(
+                                        children: [
+                                          const Icon(LucideIcons.mapPin,
+                                              color: Colors.white70, size: 11),
+                                          const SizedBox(width: 4),
+                                          Text(post.location,
+                                              style: GoogleFonts.inter(
+                                                  color: Colors.white
+                                                      .withOpacity(0.7),
+                                                  fontSize: 11)),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
@@ -2495,7 +3078,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                               if (post.isVideo)
                                 SpringButton(
                                   onTap: () {
-                                    final isMuted = _mutedVideoPostIds.contains(post.id);
+                                    final isMuted =
+                                        _mutedVideoPostIds.contains(post.id);
                                     setState(() {
                                       if (isMuted) {
                                         _mutedVideoPostIds.remove(post.id);
@@ -2505,9 +3089,15 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                     });
                                     MorphingCapsule.show(
                                       context,
-                                      icon: isMuted ? LucideIcons.volume2 : LucideIcons.volumeX,
-                                      label: isMuted ? 'Sound unmuted' : 'Sound muted',
-                                      color: isMuted ? const Color(0xFF54C5F8) : Colors.white70,
+                                      icon: isMuted
+                                          ? LucideIcons.volume2
+                                          : LucideIcons.volumeX,
+                                      label: isMuted
+                                          ? 'Sound unmuted'
+                                          : 'Sound muted',
+                                      color: isMuted
+                                          ? const Color(0xFF54C5F8)
+                                          : Colors.white70,
                                     );
                                   },
                                   child: Container(
@@ -2519,16 +3109,18 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                                       border: Border.all(color: Colors.white24),
                                     ),
                                     child: Icon(
-                                      _mutedVideoPostIds.contains(post.id) ? LucideIcons.volumeX : LucideIcons.volume2,
+                                      _mutedVideoPostIds.contains(post.id)
+                                          ? LucideIcons.volumeX
+                                          : LucideIcons.volume2,
                                       color: Colors.white,
                                       size: 15,
                                     ),
                                   ),
                                 ),
                               SwipeActionBar(
-                            isLiked: isLiked,
-                            likesCount: visibleLikes,
-                            onLikeToggled: () => _triggerLike(post),
+                                isLiked: isLiked,
+                                likesCount: visibleLikes,
+                                onLikeToggled: () => _triggerLike(post),
                               ),
                             ],
                           ),
@@ -2552,14 +3144,15 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                             post: post,
                             isSaved: isSaved,
                             onSaveToggled: () => _triggerSave(post.id),
-                            onShowDescription: () => _showDescriptionCover(post),
+                            onShowDescription: () =>
+                                _showDescriptionCover(post),
                             initialMode: (_coveredPostId == post.id)
                                 ? UIMode.fullScreen
                                 : UIMode.snippet,
-                            initialPageIndex:
-                                (_coveredPostId == post.id && _coveredPostShowsComments)
-                                    ? 1
-                                    : 0,
+                            initialPageIndex: (_coveredPostId == post.id &&
+                                    _coveredPostShowsComments)
+                                ? 1
+                                : 0,
                             onModeChanged: (mode) {
                               if (mode != UIMode.fullScreen &&
                                   _coveredPostId == post.id) {
@@ -2618,6 +3211,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   // ─── PICKED FOR YOU ──────────────────────────────────────────────────────────
 
   Widget _buildPickedForYouSection() {
+    if (_pickedPosts.isEmpty) return const SizedBox.shrink();
     return Container(
       color: ThemeProvider.backgroundWarmWhite,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -2663,7 +3257,10 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
               physics: const BouncingScrollPhysics(),
               itemCount: _pickedPosts.length,
               itemBuilder: (context, index) => SpringButton(
-                onTap: () => _openReelsScreen(index % _posts.length),
+                onTap: () {
+                  if (_posts.isNotEmpty)
+                    _openReelsScreen(index % _posts.length);
+                },
                 scale: 0.94,
                 borderRadius: BorderRadius.circular(18),
                 child: _buildPickedPostCard(_pickedPosts[index]),

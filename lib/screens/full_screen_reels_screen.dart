@@ -13,6 +13,7 @@ import '../screens/user_profile_detail_screen.dart';
 import '../utils/mock_data.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../services/supabase_data_service.dart';
 
 // ── Multi-device drag behavior (Touch, Mouse, Trackpad, Stylus) ──────────────
 class _ReelsScrollBehavior extends MaterialScrollBehavior {
@@ -29,11 +30,15 @@ class _ReelsScrollBehavior extends MaterialScrollBehavior {
 class FullScreenReelsScreen extends StatefulWidget {
   final List<FeedPost> posts;
   final int initialIndex;
+  final Set<String>? initialLikedPostIds;
+  final void Function(FeedPost)? onLikeToggled;
 
   const FullScreenReelsScreen({
     super.key,
     required this.posts,
     this.initialIndex = 0,
+    this.initialLikedPostIds,
+    this.onLikeToggled,
   });
 
   @override
@@ -188,6 +193,9 @@ class _FullScreenReelsScreenState extends State<FullScreenReelsScreen>
   @override
   void initState() {
     super.initState();
+    if (widget.initialLikedPostIds != null) {
+      _likedPostIds.addAll(widget.initialLikedPostIds!);
+    }
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
 
@@ -247,8 +255,10 @@ class _FullScreenReelsScreenState extends State<FullScreenReelsScreen>
   }
 
   void _triggerDoubleTapLike(TapDownDetails details, FeedPost post) {
+    if (!_likedPostIds.contains(post.id)) {
+      _toggleLike(post);
+    }
     setState(() {
-      _likedPostIds.add(post.id);
       _heartAnimPosition = details.localPosition;
       _showHeartAnim = true;
     });
@@ -264,10 +274,17 @@ class _FullScreenReelsScreenState extends State<FullScreenReelsScreen>
     setState(() {
       if (_likedPostIds.contains(post.id)) {
         _likedPostIds.remove(post.id);
+        if (post.likesCount > 0) post.likesCount--;
       } else {
         _likedPostIds.add(post.id);
+        post.likesCount++;
       }
     });
+    if (widget.onLikeToggled != null) {
+      widget.onLikeToggled!(post);
+    } else {
+      SupabaseDataService.togglePostLike(post.id);
+    }
   }
 
   void _toggleSave(FeedPost post) {
@@ -400,7 +417,7 @@ class _FullScreenReelsScreenState extends State<FullScreenReelsScreen>
   Widget _buildMobileReelPage(FeedPost post) {
     final isLiked = _likedPostIds.contains(post.id);
     final isSaved = _savedPostIds.contains(post.id);
-    final visibleLikes = post.likesCount + (isLiked ? 1 : 0);
+    final visibleLikes = post.likesCount;
 
     return Stack(
       fit: StackFit.expand,
@@ -409,7 +426,7 @@ class _FullScreenReelsScreenState extends State<FullScreenReelsScreen>
         Positioned.fill(
           child: Image.network(
             post.imageUrl,
-            fit: BoxFit.cover,
+            fit: BoxFit.contain,
             errorBuilder: (_, __, ___) => Container(
               color: const Color(0xFF141418),
               child: const Center(
@@ -656,47 +673,17 @@ class _FullScreenReelsScreenState extends State<FullScreenReelsScreen>
     );
   }
 
-  // ── Windows Desktop Reel Page (Liquid Glass Background + Split View) ───────
+  // ── Windows Desktop Reel Page (Clean Obsidian Black + Split View) ───────
   Widget _buildDesktopReelPage(FeedPost post) {
     final isLiked = _likedPostIds.contains(post.id);
-    final visibleLikes = post.likesCount + (isLiked ? 1 : 0);
+    final visibleLikes = post.likesCount;
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        // ── 1. Liquid Glass Ambient Backdrop (Image with heavy blur) ────────
+        // ── 1. Clean Obsidian Black Background (Exact same pure theme as Home Feed) ──
         Positioned.fill(
-          child: Image.network(
-            post.imageUrl,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(color: const Color(0xFF09090B)),
-          ),
-        ),
-        Positioned.fill(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 45, sigmaY: 45),
-            child: Container(
-              color: const Color(0xFF09090B).withOpacity(0.75),
-            ),
-          ),
-        ),
-        // Ambient glass radial highlight circles
-        Positioned(
-          top: -120,
-          right: -80,
-          child: Container(
-            width: 450,
-            height: 450,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  const Color(0xFF54C5F8).withOpacity(0.12),
-                  Colors.transparent,
-                ],
-              ),
-            ),
-          ),
+          child: Container(color: const Color(0xFF09090B)),
         ),
 
         // ── 2. Top Header Bar ──────────────────────────────────────────────
@@ -888,53 +875,33 @@ class _FullScreenReelsScreenState extends State<FullScreenReelsScreen>
 
   // ── Contained Post Image (Shows in original size / natural aspect ratio, not stretched) ──
   Widget _buildContainedPostImage(FeedPost post) {
-    final cardMaxHeight = MediaQuery.of(context).size.height * 0.82;
-
     return Center(
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: 680,
-          maxHeight: cardMaxHeight,
-        ),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: Colors.white.withOpacity(0.20), width: 1.2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.55),
-              blurRadius: 36,
-              offset: const Offset(0, 14),
-            ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: LayoutBuilder(
-          builder: (ctx, innerConstraints) {
-            final w = innerConstraints.maxWidth.isFinite ? innerConstraints.maxWidth : 680.0;
-            final h = innerConstraints.maxHeight.isFinite ? innerConstraints.maxHeight : cardMaxHeight;
-            final cardSize = Size(w, h);
+      child: LayoutBuilder(
+        builder: (ctx, innerConstraints) {
+          final cardSize = Size(innerConstraints.maxWidth, innerConstraints.maxHeight);
 
-            return GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onVerticalDragEnd: (details) {
-                if (details.primaryVelocity != null && details.primaryVelocity! < -150) {
-                  // Swipe up opens both description left & comments right!
-                  setState(() {
-                    _desktopDescriptionOpen = true;
-                    _desktopCommentsOpen = true;
-                  });
-                }
-              },
-              onLongPressStart: (details) =>
-                  _startQuickActions(post, details, cardSize),
-              onLongPressMoveUpdate: _updateQuickActions,
-              onLongPressEnd: (_) => _finishQuickActions(post),
-              onLongPressCancel: () =>
-                  setState(() => _activeActionPostId = null),
-              child: Stack(
-                fit: StackFit.passthrough,
-                children: [
-                  Image.network(
+          return GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onVerticalDragEnd: (details) {
+              if (details.primaryVelocity != null && details.primaryVelocity! < -150) {
+                // Swipe up opens both description left & comments right!
+                setState(() {
+                  _desktopDescriptionOpen = true;
+                  _desktopCommentsOpen = true;
+                });
+              }
+            },
+            onLongPressStart: (details) =>
+                _startQuickActions(post, details, cardSize),
+            onLongPressMoveUpdate: _updateQuickActions,
+            onLongPressEnd: (_) => _finishQuickActions(post),
+            onLongPressCancel: () =>
+                setState(() => _activeActionPostId = null),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Center(
+                  child: Image.network(
                     post.imageUrl,
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => Container(
@@ -945,25 +912,25 @@ class _FullScreenReelsScreenState extends State<FullScreenReelsScreen>
                       ),
                     ),
                   ),
-                  if (_activeActionPostId == post.id)
-                    quick_actions.FloatingActionBar(
-                      position: _actionBarPosition,
-                      touchPosition: _actionTouchPosition,
-                      onActionSelected: (idx) {
-                        setState(() => _activeActionPostId = null);
-                        _executeQuickAction(post, idx);
-                      },
-                      onCancel: () =>
-                          setState(() => _activeActionPostId = null),
-                      commentsCount: post.commentsCount,
-                      sharesCount: post.sharesCount,
-                      width: _activeActionBarWidth,
-                    ),
-                ],
-              ),
-            );
-          },
-        ),
+                ),
+                if (_activeActionPostId == post.id)
+                  quick_actions.FloatingActionBar(
+                    position: _actionBarPosition,
+                    touchPosition: _actionTouchPosition,
+                    onActionSelected: (idx) {
+                      setState(() => _activeActionPostId = null);
+                      _executeQuickAction(post, idx);
+                    },
+                    onCancel: () =>
+                        setState(() => _activeActionPostId = null),
+                    commentsCount: post.commentsCount,
+                    sharesCount: post.sharesCount,
+                    width: _activeActionBarWidth,
+                  ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }

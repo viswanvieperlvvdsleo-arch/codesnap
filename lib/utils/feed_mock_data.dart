@@ -48,7 +48,7 @@ class FeedPost {
   final String imageUrl;
   final int commentsCount;
   final int sharesCount;
-  final int likesCount;
+  int likesCount;
   final String captionTitle;
   final String captionBody;
   final String musicTitle;
@@ -78,6 +78,46 @@ class FeedPost {
     this.isVideo = false,
     this.videoUrl,
   });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'username': username,
+    'location': location,
+    'avatarUrl': avatarUrl,
+    'imageUrl': imageUrl,
+    'commentsCount': commentsCount,
+    'sharesCount': sharesCount,
+    'likesCount': likesCount,
+    'captionTitle': captionTitle,
+    'captionBody': captionBody,
+    'musicTitle': musicTitle,
+    'musicArtist': musicArtist,
+    'musicCoverUrl': musicCoverUrl,
+    'likedByAvatars': likedByAvatars,
+    'likedByText': likedByText,
+    'isVideo': isVideo,
+    'videoUrl': videoUrl,
+  };
+
+  factory FeedPost.fromJson(Map<String, dynamic> j) => FeedPost(
+    id: j['id']?.toString() ?? '',
+    username: j['username']?.toString() ?? 'developer',
+    location: j['location']?.toString() ?? 'Tokyo Cloud',
+    avatarUrl: j['avatarUrl']?.toString() ?? '',
+    imageUrl: j['imageUrl']?.toString() ?? '',
+    commentsCount: (j['commentsCount'] as num?)?.toInt() ?? 0,
+    sharesCount: (j['sharesCount'] as num?)?.toInt() ?? 0,
+    likesCount: (j['likesCount'] as num?)?.toInt() ?? 0,
+    captionTitle: j['captionTitle']?.toString() ?? '',
+    captionBody: j['captionBody']?.toString() ?? '',
+    musicTitle: j['musicTitle']?.toString() ?? 'Original Audio',
+    musicArtist: j['musicArtist']?.toString() ?? '',
+    musicCoverUrl: j['musicCoverUrl']?.toString() ?? '',
+    likedByAvatars: (j['likedByAvatars'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+    likedByText: j['likedByText']?.toString() ?? '',
+    isVideo: j['isVideo'] == true,
+    videoUrl: j['videoUrl']?.toString(),
+  );
 }
 
 class PickedPost {

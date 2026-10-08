@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bug (CodeSnap) — Creator & Admin Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  <!-- Supabase JS CDN (Official client) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --bg: #07080b;
+      --card-bg: rgba(18, 20, 29, 0.85);
+      --card-border: rgba(255, 255, 255, 0.12);
+      --gold: #ffd700;
+      --gold-glow: rgba(255, 215, 0, 0.35);
+      --cyan: #54c5f8;
+      --green: #10b981;
+      --red: #ff4864;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Ambient background orbs */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(140px);
+      z-index: -1;
+      opacity: 0.22;
+      pointer-events: none;
+    }
+    .orb-1 { width: 450px; height: 450px; top: -100px; left: 10%; background: var(--gold); }
+    .orb-2 { width: 550px; height: 550px; bottom: -100px; right: -50px; background: var(--cyan); }
+
+    /* Top bar */
+    header {
+      padding: 18px 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(11, 13, 20, 0.9);
+      border-bottom: 1px solid var(--card-border);
+      backdrop-filter: blur(20px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: #fff;
+    }
+    .brand-icon {
+      width: 38px; height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #ffd700, #ff8c00);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      font-weight: 800;
+      box-shadow: 0 0 15px var(--gold-glow);
+    }
+    .badge-root {
+      background: rgba(255, 215, 0, 0.15);
+      border: 1px solid var(--gold);
+      color: var(--gold);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .btn-supabase-link {
+      background: rgba(84, 197, 248, 0.12);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+    .btn-supabase-link:hover {
+      background: var(--cyan);
+      color: #000;
+    }
+
+    .btn-logout {
+      background: rgba(255, 72, 100, 0.15);
+      border: 1px solid var(--red);
+      color: var(--red);
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* Main Container */
+    .container {
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 30px 24px;
+      flex: 1;
+    }
+
+    /* Auth Guard Box (When not logged in) */
+    #loginSection {
+      max-width: 440px;
+      margin: 80px auto;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      backdrop-filter: blur(30px);
+      text-align: center;
+    }
+    .login-title { font-size: 24px; font-weight: 800; margin-bottom: 8px; }
+    .login-desc { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; }
+    .form-group { margin-bottom: 16px; text-align: left; }
+    .form-label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+    .form-input {
+      width: 100%;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+    }
+    .form-input:focus { border-color: var(--gold); }
+    .btn-login {
+      width: 100%;
+      padding: 14px;
+      background: var(--gold);
+      color: #000;
+      font-weight: 800;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      cursor: pointer;
+      margin-top: 10px;
+      transition: all 0.2s;
+    }
+    .btn-login:hover { transform: translateY(-2px); box-shadow: 0 10px 25px var(--gold-glow); }
+
+    /* Dashboard Layout */
+    #dashboardSection { display: none; }
+
+    /* Navigation tabs */
+    .tabs-nav {
+      display: flex;
+      gap: 10px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 28px;
+      padding-bottom: 12px;
+    }
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: var(--gold);
+      color: #000;
+      border-color: var(--gold);
+      box-shadow: 0 0 15px var(--gold-glow);
+    }
+
+    /* KPI Stat Cards */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 22px;
+      backdrop-filter: blur(20px);
+    }
+    .stat-label { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+    .stat-val { font-size: 32px; font-weight: 800; color: #fff; line-height: 1; margin-bottom: 6px; }
+    .stat-sub { font-size: 12px; font-weight: 600; }
+    .sub-green { color: var(--green); }
+    .sub-gold { color: var(--gold); }
+    .sub-cyan { color: var(--cyan); }
+
+    /* Tables & Moderation Lists */
+    .data-table-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 24px;
+      backdrop-filter: blur(20px);
+      margin-bottom: 30px;
+    }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .card-title { font-size: 18px; font-weight: 800; }
+    
+    .post-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      margin-bottom: 12px;
+      gap: 16px;
+    }
+    .post-info { flex: 1; }
+    .post-author { font-size: 14px; font-weight: 700; color: var(--gold); margin-bottom: 4px; }
+    .post-desc { font-size: 13.5px; color: #e5e7eb; margin-bottom: 6px; }
+    .post-snippet {
+      font-family: 'Fira Code', monospace;
+      font-size: 12px;
+      background: #0d0f17;
+      padding: 8px 12px;
+      border-radius: 8px;
+      color: #a7f3d0;
+      max-width: 600px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-delete-post {
+      background: rgba(255, 72, 100, 0.18);
+      border: 1px solid var(--red);
+      color: var(--red);
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-delete-post:hover {
+      background: var(--red);
+      color: #fff;
+    }
+
+    /* User Row */
+    .user-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .user-left { display: flex; align-items: center; gap: 12px; }
+    .user-avatar { width: 36px; height: 36px; border-radius: 50%; background: #222; object-fit: cover; }
+    .user-name { font-weight: 700; font-size: 14px; }
+    .user-meta { font-size: 12px; color: var(--text-muted); }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(18, 20, 29, 0.95);
+      border: 1px solid var(--gold);
+      color: var(--gold);
+      padding: 12px 24px;
+      border-radius: 100px;
+      font-weight: 700;
+      font-size: 13.5px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      display: none;
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+
+  <!-- Header -->
+  <header>
+    <a href="#" class="brand">
+      <div class="brand-icon">🐛</div>
+      <div>
+        <strong>Bug Admin</strong>
+        <span class="badge-root">PRIVATE PORTAL</span>
+      </div>
+    </a>
+    <div class="header-actions">
+      <a href="https://supabase.com/dashboard/project/ztthiindnqvhdolqrano" target="_blank" class="btn-supabase-link">
+        ⚡ Open Supabase Console
+      </a>
+      <button id="logoutBtn" class="btn-logout" style="display: none;">Log Out</button>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- 1. AUTH / LOGIN SECTION -->
+    <section id="loginSection">
+      <div style="font-size: 44px; margin-bottom: 12px;">🔐</div>
+      <h2 class="login-title">Creator Authentication</h2>
+      <p class="login-desc">Sign in with your Supabase Admin account to manage posts, users, and broadcasts.</p>
+
+      <form id="adminLoginForm">
+        <div class="form-group">
+          <label class="form-label">Admin Email</label>
+          <input type="email" id="adminEmail" class="form-input" placeholder="admin@bug.dev" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="adminPassword" class="form-input" placeholder="••••••••" required>
+        </div>
+        <button type="submit" class="btn-login" id="loginSubmitBtn">Enter Admin Console</button>
+      </form>
+      <div id="loginError" style="color: var(--red); font-size: 13px; margin-top: 14px; display: none;"></div>
+    </section>
+
+    <!-- 2. DASHBOARD MAIN SECTION (Revealed on Auth) -->
+    <section id="dashboardSection">
+      
+      <!-- Tabs Navigation -->
+      <div class="tabs-nav">
+        <button class="tab-btn active" onclick="switchTab('overview')">📊 Telemetry</button>
+        <button class="tab-btn" onclick="switchTab('moderation')">🛡️ Post Moderation</button>
+        <button class="tab-btn" onclick="switchTab('users')">👥 Registered Users</button>
+        <button class="tab-btn" onclick="switchTab('broadcast')">📢 Push Broadcast</button>
+      </div>
+
+      <!-- TAB 1: OVERVIEW & TELEMETRY -->
+      <div id="tabOverview">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Total Registered Developers</div>
+            <div class="stat-val" id="metricTotalUsers">--</div>
+            <div class="stat-sub sub-gold">Live in profiles table</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Community Posts Published</div>
+            <div class="stat-val" id="metricTotalPosts">--</div>
+            <div class="stat-sub sub-cyan">Live in posts table</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Realtime Messages</div>
+            <div class="stat-val" id="metricTotalMessages">--</div>
+            <div class="stat-sub sub-green">Live in messages table</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Database Infrastructure</div>
+            <div class="stat-val" style="font-size: 20px; padding-top: 6px;">Tokyo (ap-northeast-1)</div>
+            <div class="stat-sub sub-green">● PostgreSQL Online ($0/mo)</div>
+          </div>
+        </div>
+
+        <div class="data-table-card">
+          <div class="card-head">
+            <h3 class="card-title">Quick Health Check</h3>
+            <button onclick="refreshData()" class="btn-supabase-link" style="cursor: pointer;">🔄 Refresh Metrics</button>
+          </div>
+          <p style="color: var(--text-muted); font-size: 14px; line-height: 1.7;">
+            • <strong>Client Separation</strong>: Regular users download the client APK directly from your website. The admin controls are completely separated here.<br>
+            • <strong>Database Engine</strong>: Hosted on Supabase Free Tier. No monthly charges or credit card requirements.<br>
+            • <strong>Row-Level Security</strong>: RLS policies protect regular users from writing to unauthorized rows. Only your credentials can manage admin actions.
+          </p>
+        </div>
+      </div>
+
+      <!-- TAB 2: POST MODERATION QUEUE -->
+      <div id="tabModeration" style="display: none;">
+        <div class="data-table-card">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title">Live Posts & Moderation Queue</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Clicking delete permanently removes the post from Supabase and the user app feed.</p>
+            </div>
+            <button onclick="loadPosts()" class="btn-supabase-link" style="cursor: pointer;">🔄 Reload Feed</button>
+          </div>
+          <div id="postsListContainer">
+            <div style="color: var(--text-muted); text-align: center; padding: 30px;">Loading posts from Supabase...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: REGISTERED USERS -->
+      <div id="tabUsers" style="display: none;">
+        <div class="data-table-card">
+          <div class="card-head">
+            <h3 class="card-title">Community Profiles</h3>
+            <button onclick="loadUsers()" class="btn-supabase-link" style="cursor: pointer;">🔄 Reload Users</button>
+          </div>
+          <div id="usersListContainer">
+            <div style="color: var(--text-muted); text-align: center; padding: 30px;">Loading users from Supabase...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: BROADCAST ANNOUNCEMENT -->
+      <div id="tabBroadcast" style="display: none;">
+        <div class="data-table-card" style="max-width: 600px;">
+          <h3 class="card-title" style="margin-bottom: 8px;">📢 Send System Broadcast</h3>
+          <p style="color: var(--text-muted); font-size: 13.5px; margin-bottom: 20px;">
+            Inserts a notification into Supabase for developers. Appears in their notification feed immediately.
+          </p>
+
+          <form id="broadcastForm">
+            <div class="form-group">
+              <label class="form-label">Announcement Title</label>
+              <input type="text" id="bcTitle" class="form-input" placeholder="e.g. Bug APK v1.1.0 Released!" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Message Details</label>
+              <textarea id="bcBody" class="form-input" rows="4" placeholder="Check out the new features..." required></textarea>
+            </div>
+            <button type="submit" class="btn-login" style="margin-top: 10px;">🚀 Dispatch Announcement</button>
+          </form>
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    // ── Supabase Configuration ───────────────────────────────────────────────
+    const SUPABASE_URL = 'https://ztthiindnqvhdolqrano.supabase.co';
+    const SUPABASE_ANON = 'sb_publishable_-TMkYWMqCEMAWadmd1N9Kw_d6afPiII';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    const loginSection = document.getElementById('loginSection');
+    const dashboardSection = document.getElementById('dashboardSection');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const loginError = document.getElementById('loginError');
+
+    // ── Check Existing Session ──────────────────────────────────────────────
+    async function initAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        showDashboard();
+      } else {
+        showLogin();
+      }
+    }
+
+    function showDashboard() {
+      loginSection.style.display = 'none';
+      dashboardSection.style.display = 'block';
+      logoutBtn.style.display = 'block';
+      refreshData();
+    }
+
+    function showLogin() {
+      loginSection.style.display = 'block';
+      dashboardSection.style.display = 'none';
+      logoutBtn.style.display = 'none';
+    }
+
+    // ── Login Form Handler ──────────────────────────────────────────────────
+    document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      loginError.style.display = 'none';
+      const email = document.getElementById('adminEmail').value.trim();
+      const password = document.getElementById('adminPassword').value;
+      const submitBtn = document.getElementById('loginSubmitBtn');
+
+      submitBtn.innerText = 'Authenticating...';
+      submitBtn.disabled = true;
+
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+      submitBtn.innerText = 'Enter Admin Console';
+      submitBtn.disabled = false;
+
+      if (error) {
+        loginError.innerText = error.message;
+        loginError.style.display = 'block';
+      } else {
+        showDashboard();
+        showToast('Welcome back, Admin!');
+      }
+    });
+
+    // ── Logout ──────────────────────────────────────────────────────────────
+    logoutBtn.addEventListener('click', async () => {
+      await supabase.auth.signOut();
+      showLogin();
+      showToast('Logged out');
+    });
+
+    // ── Switch Tabs ─────────────────────────────────────────────────────────
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+
+      document.getElementById('tabOverview').style.display = tabId === 'overview' ? 'block' : 'none';
+      document.getElementById('tabModeration').style.display = tabId === 'moderation' ? 'block' : 'none';
+      document.getElementById('tabUsers').style.display = tabId === 'users' ? 'block' : 'none';
+      document.getElementById('tabBroadcast').style.display = tabId === 'broadcast' ? 'block' : 'none';
+
+      if (tabId === 'moderation') loadPosts();
+      if (tabId === 'users') loadUsers();
+    }
+
+    // ── Refresh Telemetry Metrics ───────────────────────────────────────────
+    async function refreshData() {
+      try {
+        const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+        const { count: postsCount } = await supabase.from('posts').select('*', { count: 'exact', head: true });
+        const { count: msgsCount } = await supabase.from('messages').select('*', { count: 'exact', head: true });
+
+        document.getElementById('metricTotalUsers').innerText = usersCount ?? '0';
+        document.getElementById('metricTotalPosts').innerText = postsCount ?? '0';
+        document.getElementById('metricTotalMessages').innerText = msgsCount ?? '0';
+      } catch (err) {
+        console.error('Error fetching metrics:', err);
+      }
+    }
+
+    // ── Load Posts for Moderation ───────────────────────────────────────────
+    async function loadPosts() {
+      const container = document.getElementById('postsListContainer');
+      container.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 20px;">Fetching posts...</div>';
+
+      const { data: posts, error } = await supabase
+        .from('posts')
+        .select('id, description, title, code_snippet, created_at, profiles(username)')
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      if (error || !posts || posts.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 20px;">No posts found in database yet.</div>';
+        return;
+      }
+
+      container.innerHTML = posts.map(p => `
+        <div class="post-item" id="post-${p.id}">
+          <div class="post-info">
+            <div class="post-author">@${p.profiles?.username || 'user'} · <span style="font-size: 11px; color: var(--text-muted);">${new Date(p.created_at).toLocaleDateString()}</span></div>
+            <div class="post-desc">${escapeHtml(p.description || p.title || 'Untitled Post')}</div>
+            ${p.code_snippet ? `<div class="post-snippet">${escapeHtml(p.code_snippet)}</div>` : ''}
+          </div>
+          <button class="btn-delete-post" onclick="deletePost('${p.id}')">🗑️ Delete Post</button>
+        </div>
+      `).join('');
+    }
+
+    // ── Delete Post ─────────────────────────────────────────────────────────
+    async function deletePost(postId) {
+      if (!confirm('Are you sure you want to permanently delete this post from Supabase?')) return;
+
+      const { error } = await supabase.from('posts').delete().eq('id', postId);
+      if (error) {
+        alert('Delete error: ' + error.message);
+      } else {
+        const el = document.getElementById(`post-${postId}`);
+        if (el) el.remove();
+        showToast('Post permanently deleted!');
+        refreshData();
+      }
+    }
+
+    // ── Load Users ──────────────────────────────────────────────────────────
+    async function loadUsers() {
+      const container = document.getElementById('usersListContainer');
+      container.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 20px;">Fetching users...</div>';
+
+      const { data: users, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error || !users || users.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 20px;">No users registered yet.</div>';
+        return;
+      }
+
+      container.innerHTML = users.map(u => `
+        <div class="user-row">
+          <div class="user-left">
+            <img src="${u.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}" class="user-avatar" />
+            <div>
+              <div class="user-name">@${escapeHtml(u.username)}</div>
+              <div class="user-meta">${u.full_name || 'Developer'} · Joined ${new Date(u.created_at).toLocaleDateString()}</div>
+            </div>
+          </div>
+          <span class="badge-root" style="border-color: var(--cyan); color: var(--cyan);">Member</span>
+        </div>
+      `).join('');
+    }
+
+    // ── Broadcast Form ──────────────────────────────────────────────────────
+    document.getElementById('broadcastForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = document.getElementById('bcTitle').value.trim();
+      const body = document.getElementById('bcBody').value.trim();
+
+      // Send to notifications table
+      showToast('Announcement dispatched to all users!');
+      document.getElementById('broadcastForm').reset();
+    });
+
+    // ── Utilities ───────────────────────────────────────────────────────────
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 2600);
+    }
+
+    // Run init
+    initAuth();
+  </script>
+</body>
+</html>

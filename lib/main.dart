@@ -6,9 +6,11 @@ import 'providers/theme_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_layout_screen.dart';
 import 'widgets/elastic_scroll_view.dart';
+import 'services/supabase_service.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SupabaseService.initialize();
   runApp(
     MultiProvider(
       providers: [

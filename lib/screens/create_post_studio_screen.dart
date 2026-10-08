@@ -13,7 +13,15 @@ enum TextFontStyle { classic, modern, neon, handwriting, typewriter }
 
 enum CropAspectRatio { free, square, feedPortrait, storyVertical, landscape }
 
-enum AestheticFilter { none, goldenHour, cyberpunk, monochrome, cinematic, vintage, sepia }
+enum AestheticFilter {
+  none,
+  goldenHour,
+  cyberpunk,
+  monochrome,
+  cinematic,
+  vintage,
+  sepia
+}
 
 class DrawnLine {
   final List<Offset> points;
@@ -49,7 +57,7 @@ class CreatePostStudioScreen extends StatefulWidget {
   final String mediaUrl;
   final bool isVideo;
   final PostDestination initialDestination;
-  final Function({
+  final Future<void> Function({
     required PostDestination destination,
     required String mediaUrl,
     required String? caption,
@@ -95,7 +103,7 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
 
   // Color adjustments & Filters
   double _brightness = 0.0; // -0.5 to 0.5
-  double _contrast = 1.0;   // 0.5 to 1.5
+  double _contrast = 1.0; // 0.5 to 1.5
   double _saturation = 1.0; // 0.0 to 2.0
   AestheticFilter _activeFilter = AestheticFilter.none;
 
@@ -108,7 +116,9 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
   final TextEditingController _storyCaptionCtrl = TextEditingController();
   final TextEditingController _feedTitleCtrl = TextEditingController();
   final TextEditingController _feedDescCtrl = TextEditingController();
-  final TextEditingController _feedLocationCtrl = TextEditingController(text: 'San Francisco, CA');
+  final TextEditingController _feedLocationCtrl =
+      TextEditingController(text: 'San Francisco, CA');
+  bool _isPublishing = false;
 
   @override
   void initState() {
@@ -159,10 +169,26 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
 
     // Base matrix
     List<double> m = [
-      c * r1, c * g1, c * b1, 0, b,
-      c * r2, c * g2, c * b2, 0, b,
-      c * r3, c * g3, c * b3, 0, b,
-      0,      0,      0,      1, 0,
+      c * r1,
+      c * g1,
+      c * b1,
+      0,
+      b,
+      c * r2,
+      c * g2,
+      c * b2,
+      0,
+      b,
+      c * r3,
+      c * g3,
+      c * b3,
+      0,
+      b,
+      0,
+      0,
+      0,
+      1,
+      0,
     ];
 
     switch (_activeFilter) {
@@ -179,10 +205,26 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
         break;
       case AestheticFilter.monochrome:
         return [
-          0.299, 0.587, 0.114, 0, b,
-          0.299, 0.587, 0.114, 0, b,
-          0.299, 0.587, 0.114, 0, b,
-          0,     0,     0,     1, 0,
+          0.299,
+          0.587,
+          0.114,
+          0,
+          b,
+          0.299,
+          0.587,
+          0.114,
+          0,
+          b,
+          0.299,
+          0.587,
+          0.114,
+          0,
+          b,
+          0,
+          0,
+          0,
+          1,
+          0,
         ];
       case AestheticFilter.cinematic:
         m[0] *= 1.1;
@@ -200,10 +242,26 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
         break;
       case AestheticFilter.sepia:
         return [
-          0.393, 0.769, 0.189, 0, b,
-          0.349, 0.686, 0.168, 0, b,
-          0.272, 0.534, 0.131, 0, b,
-          0,     0,     0,     1, 0,
+          0.393,
+          0.769,
+          0.189,
+          0,
+          b,
+          0.349,
+          0.686,
+          0.168,
+          0,
+          b,
+          0.272,
+          0.534,
+          0.131,
+          0,
+          b,
+          0,
+          0,
+          0,
+          1,
+          0,
         ];
       case AestheticFilter.none:
       default:
@@ -235,7 +293,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
               ),
               decoration: BoxDecoration(
                 color: const Color(0xFF141620).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
                 border: Border.all(color: Colors.white.withOpacity(0.18)),
               ),
               child: Column(
@@ -254,7 +313,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(LucideIcons.check, color: Color(0xFFFFD700)),
+                        icon: const Icon(LucideIcons.check,
+                            color: Color(0xFFFFD700)),
                         onPressed: () {
                           final text = _textInputCtrl.text.trim();
                           if (text.isNotEmpty) {
@@ -283,12 +343,14 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                     cursorColor: const Color(0xFFFFD700),
                     decoration: InputDecoration(
                       hintText: 'Type something...',
-                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
+                      hintStyle:
+                          TextStyle(color: Colors.white.withOpacity(0.4)),
                       filled: true,
                       fillColor: Colors.white.withOpacity(0.08),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(color: Colors.white.withOpacity(0.15)),
+                        borderSide:
+                            BorderSide(color: Colors.white.withOpacity(0.15)),
                       ),
                     ),
                   ),
@@ -313,7 +375,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                             selected: isSel,
                             selectedColor: const Color(0xFFFFD700),
                             backgroundColor: Colors.white.withOpacity(0.1),
-                            onSelected: (_) => setModalState(() => selectedStyle = style),
+                            onSelected: (_) =>
+                                setModalState(() => selectedStyle = style),
                           ),
                         );
                       }).toList(),
@@ -340,7 +403,9 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                                 color: c,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: selectedColor == c ? Colors.white : Colors.white24,
+                                  color: selectedColor == c
+                                      ? Colors.white
+                                      : Colors.white24,
                                   width: selectedColor == c ? 2.5 : 1,
                                 ),
                               ),
@@ -351,7 +416,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                         tooltip: 'Toggle Background Pill',
                         icon: Icon(
                           hasBg ? LucideIcons.badgePercent : LucideIcons.type,
-                          color: hasBg ? const Color(0xFFFFD700) : Colors.white60,
+                          color:
+                              hasBg ? const Color(0xFFFFD700) : Colors.white60,
                         ),
                         onPressed: () => setModalState(() => hasBg = !hasBg),
                       ),
@@ -409,41 +475,65 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
 
   String _getFontStyleName(TextFontStyle style) {
     switch (style) {
-      case TextFontStyle.classic: return 'Classic';
-      case TextFontStyle.modern: return 'Modern';
-      case TextFontStyle.neon: return 'Neon';
-      case TextFontStyle.handwriting: return 'Script';
-      case TextFontStyle.typewriter: return 'Typewriter';
+      case TextFontStyle.classic:
+        return 'Classic';
+      case TextFontStyle.modern:
+        return 'Modern';
+      case TextFontStyle.neon:
+        return 'Neon';
+      case TextFontStyle.handwriting:
+        return 'Script';
+      case TextFontStyle.typewriter:
+        return 'Typewriter';
     }
   }
 
   double? _getAspectRatioValue() {
     switch (_selectedCrop) {
-      case CropAspectRatio.square: return 1.0;
-      case CropAspectRatio.feedPortrait: return 4.0 / 5.0;
-      case CropAspectRatio.storyVertical: return 9.0 / 16.0;
-      case CropAspectRatio.landscape: return 16.0 / 9.0;
-      case CropAspectRatio.free: return null;
+      case CropAspectRatio.square:
+        return 1.0;
+      case CropAspectRatio.feedPortrait:
+        return 4.0 / 5.0;
+      case CropAspectRatio.storyVertical:
+        return 9.0 / 16.0;
+      case CropAspectRatio.landscape:
+        return 16.0 / 9.0;
+      case CropAspectRatio.free:
+        return null;
     }
   }
 
-  void _handlePublish() {
-    final caption = _destination == PostDestination.story ? _storyCaptionCtrl.text.trim() : null;
-    final title = _destination == PostDestination.feed ? _feedTitleCtrl.text.trim() : null;
-    final description = _destination == PostDestination.feed ? _feedDescCtrl.text.trim() : null;
-    final location = _destination == PostDestination.feed ? _feedLocationCtrl.text.trim() : null;
+  Future<void> _handlePublish() async {
+    if (_isPublishing) return;
+    final caption = _destination == PostDestination.story
+        ? _storyCaptionCtrl.text.trim()
+        : null;
+    final title = _destination == PostDestination.feed
+        ? _feedTitleCtrl.text.trim()
+        : null;
+    final description =
+        _destination == PostDestination.feed ? _feedDescCtrl.text.trim() : null;
+    final location = _destination == PostDestination.feed
+        ? _feedLocationCtrl.text.trim()
+        : null;
 
-    widget.onPublish(
-      destination: _destination,
-      mediaUrl: widget.mediaUrl,
-      caption: caption?.isNotEmpty == true ? caption : 'Moments captured',
-      title: title?.isNotEmpty == true ? title : 'New Post',
-      description: description?.isNotEmpty == true ? description : 'Check out this fresh update!',
-      location: location,
-      musicTitle: 'Original Audio · You',
-    );
-
-    Navigator.pop(context);
+    setState(() => _isPublishing = true);
+    try {
+      await widget.onPublish(
+        destination: _destination,
+        mediaUrl: widget.mediaUrl,
+        caption: caption?.isNotEmpty == true ? caption : 'Moments captured',
+        title: title?.isNotEmpty == true ? title : 'New Post',
+        description: description?.isNotEmpty == true
+            ? description
+            : 'Check out this fresh update!',
+        location: location,
+        musicTitle: 'Original Audio · You',
+      );
+      if (mounted) Navigator.pop(context);
+    } finally {
+      if (mounted) setState(() => _isPublishing = false);
+    }
   }
 
   @override
@@ -488,7 +578,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF090A0F),
-        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
+        border:
+            Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
       ),
       child: Row(
         children: [
@@ -524,7 +615,7 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
           const Spacer(),
           // Publish Button
           SpringButton(
-            onTap: _handlePublish,
+            onTap: _isPublishing ? null : _handlePublish,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
@@ -543,16 +634,30 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    _destination == PostDestination.story ? 'Post Story' : 'Post Feed',
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12.5,
+                  if (_isPublishing)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.black,
+                      ),
+                    )
+                  else ...[
+                    Text(
+                      _destination == PostDestination.story
+                          ? 'Post Story'
+                          : 'Post Feed',
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12.5,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  const Icon(LucideIcons.arrowRight, size: 14, color: Colors.black),
+                    const SizedBox(width: 4),
+                    const Icon(LucideIcons.arrowRight,
+                        size: 14, color: Colors.black),
+                  ],
                 ],
               ),
             ),
@@ -583,7 +688,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.white.withOpacity(0.2) : Colors.transparent,
+          color:
+              isSelected ? Colors.white.withOpacity(0.2) : Colors.transparent,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
@@ -644,7 +750,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                       errorBuilder: (_, __, ___) => Container(
                         color: const Color(0xFF1E2028),
                         child: const Center(
-                          child: Icon(LucideIcons.image, size: 48, color: Colors.white30),
+                          child: Icon(LucideIcons.image,
+                              size: 48, color: Colors.white30),
                         ),
                       ),
                     ),
@@ -657,7 +764,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                     top: 12,
                     right: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.black.withOpacity(0.65),
                         borderRadius: BorderRadius.circular(8),
@@ -666,11 +774,15 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(LucideIcons.video, size: 12, color: Color(0xFFFFD700)),
+                          const Icon(LucideIcons.video,
+                              size: 12, color: Color(0xFFFFD700)),
                           const SizedBox(width: 4),
                           Text(
                             '${(_videoEndSeconds - _videoStartSeconds).toStringAsFixed(1)}s',
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
@@ -679,7 +791,9 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
 
                 // Freehand Sketch Painter & Gesture Layer
                 GestureDetector(
-                  behavior: _activeTool == 'sketch' ? HitTestBehavior.opaque : HitTestBehavior.translucent,
+                  behavior: _activeTool == 'sketch'
+                      ? HitTestBehavior.opaque
+                      : HitTestBehavior.translucent,
                   onPanStart: (details) {
                     if (_activeTool != 'sketch') return;
                     setState(() {
@@ -708,7 +822,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                 ),
 
                 // Movable & Sizable Text Overlays
-                ..._textOverlays.map((overlay) => _buildMovableTextOverlay(overlay, w, h)),
+                ..._textOverlays
+                    .map((overlay) => _buildMovableTextOverlay(overlay, w, h)),
               ],
             ),
           ),
@@ -719,10 +834,13 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
     return content;
   }
 
-  Widget _buildMovableTextOverlay(TextOverlay overlay, double canvasWidth, double canvasHeight) {
+  Widget _buildMovableTextOverlay(
+      TextOverlay overlay, double canvasWidth, double canvasHeight) {
     return Positioned(
-      left: overlay.position.dx.clamp(0.0, (canvasWidth - 80).clamp(0.0, canvasWidth)),
-      top: overlay.position.dy.clamp(0.0, (canvasHeight - 40).clamp(0.0, canvasHeight)),
+      left: overlay.position.dx
+          .clamp(0.0, (canvasWidth - 80).clamp(0.0, canvasWidth)),
+      top: overlay.position.dy
+          .clamp(0.0, (canvasHeight - 40).clamp(0.0, canvasHeight)),
       child: GestureDetector(
         onPanUpdate: (details) {
           setState(() {
@@ -753,7 +871,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
               : null,
           child: Text(
             overlay.text,
-            style: _getTextStyle(overlay.style, overlay.fontSize, overlay.color),
+            style:
+                _getTextStyle(overlay.style, overlay.fontSize, overlay.color),
           ),
         ),
       ),
@@ -780,10 +899,12 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                 children: [
                   Text(
                     'Edit Text Sticker',
-                    style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold),
+                    style: GoogleFonts.inter(
+                        color: Colors.white, fontWeight: FontWeight.bold),
                   ),
                   IconButton(
-                    icon: const Icon(LucideIcons.trash2, color: Color(0xFFFF5252), size: 18),
+                    icon: const Icon(LucideIcons.trash2,
+                        color: Color(0xFFFF5252), size: 18),
                     onPressed: () {
                       setState(() {
                         _textOverlays.remove(overlay);
@@ -800,7 +921,9 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                     children: [
                       Row(
                         children: [
-                          const Text('Size', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          const Text('Size',
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 13)),
                           Expanded(
                             child: Slider(
                               value: overlay.fontSize,
@@ -813,13 +936,16 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                               },
                             ),
                           ),
-                          Text('${overlay.fontSize.toInt()}pt', style: const TextStyle(color: Colors.white70)),
+                          Text('${overlay.fontSize.toInt()}pt',
+                              style: const TextStyle(color: Colors.white70)),
                         ],
                       ),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Background Box', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          const Text('Background Box',
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 13)),
                           Switch(
                             value: overlay.hasBackground,
                             activeColor: const Color(0xFFFFD700),
@@ -858,7 +984,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
             ),
             child: Row(
               children: [
-                const Icon(LucideIcons.sparkles, color: Color(0xFFFFD700), size: 16),
+                const Icon(LucideIcons.sparkles,
+                    color: Color(0xFFFFD700), size: 16),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
@@ -866,7 +993,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                     style: const TextStyle(color: Colors.white, fontSize: 13),
                     decoration: InputDecoration(
                       hintText: 'Add a story caption...',
-                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+                      hintStyle: TextStyle(
+                          color: Colors.white.withOpacity(0.5), fontSize: 13),
                       border: InputBorder.none,
                       isDense: true,
                     ),
@@ -897,10 +1025,14 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
             children: [
               TextField(
                 controller: _feedTitleCtrl,
-                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold),
                 decoration: InputDecoration(
                   hintText: 'Post Headline / Title...',
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+                  hintStyle: TextStyle(
+                      color: Colors.white.withOpacity(0.5), fontSize: 13),
                   border: InputBorder.none,
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(vertical: 4),
@@ -912,8 +1044,10 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                 maxLines: 2,
                 style: const TextStyle(color: Colors.white, fontSize: 12.5),
                 decoration: InputDecoration(
-                  hintText: 'Write description for feed ("instead of caption keep descriptions")...',
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 12),
+                  hintText:
+                      'Write description for feed ("instead of caption keep descriptions")...',
+                  hintStyle: TextStyle(
+                      color: Colors.white.withOpacity(0.45), fontSize: 12),
                   border: InputBorder.none,
                   isDense: true,
                 ),
@@ -921,12 +1055,14 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Icon(LucideIcons.mapPin, size: 12, color: Colors.white.withOpacity(0.6)),
+                  Icon(LucideIcons.mapPin,
+                      size: 12, color: Colors.white.withOpacity(0.6)),
                   const SizedBox(width: 4),
                   Expanded(
                     child: TextField(
                       controller: _feedLocationCtrl,
-                      style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 11),
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.8), fontSize: 11),
                       decoration: const InputDecoration(
                         border: InputBorder.none,
                         isDense: true,
@@ -1016,7 +1152,9 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFFFFD700).withOpacity(0.18) : Colors.transparent,
+          color: isActive
+              ? const Color(0xFFFFD700).withOpacity(0.18)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isActive ? const Color(0xFFFFD700) : Colors.transparent,
@@ -1051,18 +1189,25 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.04),
-        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
+        border:
+            Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
       ),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Aspect Ratio Crop', style: TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.bold)),
+              const Text('Aspect Ratio Crop',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold)),
               IconButton(
                 tooltip: 'Rotate 90°',
-                icon: const Icon(LucideIcons.rotateCw, color: Color(0xFFFFD700), size: 16),
-                onPressed: () => setState(() => _rotationQuarterTurns = (_rotationQuarterTurns + 1) % 4),
+                icon: const Icon(LucideIcons.rotateCw,
+                    color: Color(0xFFFFD700), size: 16),
+                onPressed: () => setState(() =>
+                    _rotationQuarterTurns = (_rotationQuarterTurns + 1) % 4),
               ),
             ],
           ),
@@ -1109,7 +1254,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.04),
-        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
+        border:
+            Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
       ),
       child: Row(
         children: [
@@ -1140,14 +1286,16 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
           const Spacer(),
           IconButton(
             tooltip: 'Undo last stroke',
-            icon: const Icon(LucideIcons.undo2, color: Colors.white70, size: 16),
+            icon:
+                const Icon(LucideIcons.undo2, color: Colors.white70, size: 16),
             onPressed: _drawnLines.isEmpty
                 ? null
                 : () => setState(() => _drawnLines.removeLast()),
           ),
           IconButton(
             tooltip: 'Clear sketch',
-            icon: const Icon(LucideIcons.trash2, color: Color(0xFFFF5252), size: 16),
+            icon: const Icon(LucideIcons.trash2,
+                color: Color(0xFFFF5252), size: 16),
             onPressed: _drawnLines.isEmpty
                 ? null
                 : () => setState(() => _drawnLines.clear()),
@@ -1162,7 +1310,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.04),
-        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
+        border:
+            Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
       ),
       child: Column(
         children: [
@@ -1196,7 +1345,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
           // Sliders: Brightness, Contrast, Saturation
           Row(
             children: [
-              const Text('Light', style: TextStyle(color: Colors.white60, fontSize: 11)),
+              const Text('Light',
+                  style: TextStyle(color: Colors.white60, fontSize: 11)),
               Expanded(
                 child: Slider(
                   value: _brightness,
@@ -1206,7 +1356,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
                   onChanged: (v) => setState(() => _brightness = v),
                 ),
               ),
-              const Text('Vivid', style: TextStyle(color: Colors.white60, fontSize: 11)),
+              const Text('Vivid',
+                  style: TextStyle(color: Colors.white60, fontSize: 11)),
               Expanded(
                 child: Slider(
                   value: _saturation,
@@ -1225,13 +1376,20 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
 
   String _getFilterName(AestheticFilter f) {
     switch (f) {
-      case AestheticFilter.none: return 'Original';
-      case AestheticFilter.goldenHour: return 'Golden';
-      case AestheticFilter.cyberpunk: return 'Cyberpunk';
-      case AestheticFilter.monochrome: return 'B&W';
-      case AestheticFilter.cinematic: return 'Cinematic';
-      case AestheticFilter.vintage: return 'Vintage';
-      case AestheticFilter.sepia: return 'Sepia';
+      case AestheticFilter.none:
+        return 'Original';
+      case AestheticFilter.goldenHour:
+        return 'Golden';
+      case AestheticFilter.cyberpunk:
+        return 'Cyberpunk';
+      case AestheticFilter.monochrome:
+        return 'B&W';
+      case AestheticFilter.cinematic:
+        return 'Cinematic';
+      case AestheticFilter.vintage:
+        return 'Vintage';
+      case AestheticFilter.sepia:
+        return 'Sepia';
     }
   }
 
@@ -1240,7 +1398,8 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.04),
-        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
+        border:
+            Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
       ),
       child: Column(
         children: [
@@ -1249,10 +1408,14 @@ class _CreatePostStudioScreenState extends State<CreatePostStudioScreen> {
             children: [
               Text(
                 'Video Length: ${(_videoEndSeconds - _videoStartSeconds).toStringAsFixed(1)}s (from ${_videoStartSeconds.toInt()}s to ${_videoEndSeconds.toInt()}s)',
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold),
               ),
               GestureDetector(
-                onTap: () => setState(() => _isPlayingPreview = !_isPlayingPreview),
+                onTap: () =>
+                    setState(() => _isPlayingPreview = !_isPlayingPreview),
                 child: Icon(
                   _isPlayingPreview ? LucideIcons.pause : LucideIcons.play,
                   color: const Color(0xFFFFD700),

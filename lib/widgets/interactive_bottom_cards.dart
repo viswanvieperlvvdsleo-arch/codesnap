@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../utils/app_animations.dart';
 import '../utils/feed_mock_data.dart';
 import '../providers/auth_provider.dart';
+import '../services/supabase_data_service.dart';
 import 'spring_button.dart';
 
 enum UIMode { snippet, cardRow, fullScreen }
@@ -113,85 +114,67 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
     _fullScreenPageIndex = widget.initialPageIndex;
     _pageController = PageController(initialPage: widget.initialPageIndex);
 
-    _comments = [
-      CommentItem(
-        id: 'c1',
-        username: 'elena.codes',
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop',
-        text: 'This looks absolutely amazing! The liquid glass blur feels so futuristic. 🔥',
-        timestamp: '2h',
-        likesCount: 24,
-        isLiked: false,
-        isSelf: false,
-        replies: [
-          CommentItem(
-            id: 'c1-r1',
-            username: 'alexj',
-            avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80',
-            text: 'Thank you! The custom GLSL shader cache makes a huge difference.',
-            timestamp: '1h',
-            likesCount: 4,
-            isLiked: true,
-            isSelf: true,
-            replyTo: 'elena.codes',
-          ),
-          CommentItem(
-            id: 'c1-r2',
-            username: 'dev.shots',
-            avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop',
-            text: 'Agreed, the specular highlight along the edges is super crisp.',
-            timestamp: '45m',
-            likesCount: 2,
-            isLiked: false,
-            isSelf: false,
-            replyTo: 'elena.codes',
-          ),
-        ],
-      ),
-      CommentItem(
-        id: 'c2',
-        username: 'marcus_dev',
-        avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop',
-        text: 'Where was this shot taken? The lighting in the evening is perfection.',
-        timestamp: '1h',
-        likesCount: 12,
-        isLiked: true,
-        isSelf: false,
-        replies: [
-          CommentItem(
-            id: 'c2-r1',
-            username: 'dev.shots',
-            avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop',
-            text: 'Higashiyama district in Kyoto near the Yasaka Pagoda right at dusk! ⛩️',
-            timestamp: '50m',
-            likesCount: 6,
-            isLiked: false,
-            isSelf: false,
-            replyTo: 'marcus_dev',
-          ),
-        ],
-      ),
-      CommentItem(
-        id: 'c3',
-        username: 'alexj',
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80',
-        text: 'Testing out the new 120fps hardware acceleration on this render! ✨',
-        timestamp: '35m',
-        likesCount: 9,
-        isLiked: false,
-        isSelf: true,
-      ),
-      CommentItem(
-        id: 'c4',
-        username: 'sophia_ai',
-        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop',
-        text: 'The color grading is breathtaking. What camera sensor was this?',
-        timestamp: '15m',
-        likesCount: 5,
-        isLiked: false,
-        isSelf: false,
-      ),
-    ];
+    _comments = [];
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadLiveComments();
+    });
+  }
+
+  bool _isLoadingComments = false;
+
+  Future<void> _loadLiveComments() async {
+    if (!mounted) return;
+    setState(() => _isLoadingComments = true);
+    try {
+      final data = await SupabaseDataService.fetchComments(widget.post.id);
+      if (!mounted) return;
+
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final currentUserId = auth.currentUser?.id;
+
+      final loaded = data.map((item) {
+        final profile = item['profiles'] as Map<String, dynamic>?;
+        final uname = profile?['username'] ?? profile?['full_name'] ?? 'developer';
+        final avatar = (profile?['avatar_url'] != null && (profile!['avatar_url'] as String).isNotEmpty)
+            ? profile['avatar_url'] as String
+            : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80';
+        final isSelf = (item['user_id'] != null && item['user_id'] == currentUserId);
+
+        final createdAt = item['created_at'] != null
+            ? DateTime.tryParse(item['created_at'].toString())
+            : null;
+        String timeStr = 'Just now';
+        if (createdAt != null) {
+          final diff = DateTime.now().difference(createdAt);
+          if (diff.inDays > 0) {
+            timeStr = '${diff.inDays}d';
+          } else if (diff.inHours > 0) {
+            timeStr = '${diff.inHours}h';
+          } else if (diff.inMinutes > 0) {
+            timeStr = '${diff.inMinutes}m';
+          }
+        }
+
+        return CommentItem(
+          id: item['id'].toString(),
+          username: uname,
+          avatarUrl: avatar,
+          text: item['content'] ?? '',
+          timestamp: timeStr,
+          likesCount: 0,
+          isLiked: false,
+          isSelf: isSelf,
+        );
+      }).toList();
+
+      setState(() {
+        _comments = loaded;
+        _isLoadingComments = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading comments: $e');
+      if (mounted) setState(() => _isLoadingComments = false);
+    }
   }
 
   @override
@@ -505,7 +488,7 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                                                 const SizedBox(width: 8),
                                                 Expanded(
                                                   child: Text(
-                                                    'Liked by anaya.live and 12.8K...',
+                                                    widget.post.likesCount > 0 ? '${widget.post.likesCount} ${widget.post.likesCount == 1 ? "like" : "likes"}' : 'No likes yet',
                                                     style: TextStyle(
                                                       color: Colors.white.withOpacity(0.7),
                                                       fontSize: 10,
@@ -661,13 +644,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
   }
 
   Widget _buildAvatarGroup() {
-    final avatars = widget.post.likedByAvatars.isNotEmpty
-        ? widget.post.likedByAvatars
-        : const [
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop',
-            'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop',
-            'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=100&auto=format&fit=crop',
-          ];
+    final avatars = widget.post.likedByAvatars;
+    if (avatars.isEmpty) return const SizedBox.shrink();
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -912,7 +890,7 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
           ),
           const SizedBox(height: 16),
           Text(
-            widget.post.captionBody * 3,
+            widget.post.captionBody,
             style: GoogleFonts.inter(
               color: Colors.white.withOpacity(0.95),
               fontSize: 15,
@@ -1439,10 +1417,12 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
           child: Row(
             children: [
-              const CircleAvatar(
+              CircleAvatar(
                 radius: 14,
                 backgroundImage: NetworkImage(
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80',
+                  context.watch<AuthProvider>().currentUser?.avatarUrl.isNotEmpty == true
+                      ? context.watch<AuthProvider>().currentUser!.avatarUrl
+                      : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80',
                 ),
               ),
               const SizedBox(width: 10),
@@ -1495,14 +1475,23 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
     );
   }
 
-  void _submitComment() {
+  void _submitComment() async {
     final text = _commentTextController.text.trim();
     if (text.isEmpty) return;
 
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final user = auth.currentUser;
+    final String currentUname = (user?.section?.isNotEmpty == true)
+        ? user!.section!
+        : (user?.name ?? 'You');
+    final currentAvatar = (user?.avatarUrl?.isNotEmpty == true)
+        ? user!.avatarUrl
+        : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80';
+
     final newComment = CommentItem(
       id: 'c-${DateTime.now().millisecondsSinceEpoch}',
-      username: 'alexj',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80',
+      username: currentUname,
+      avatarUrl: currentAvatar,
       text: text,
       timestamp: 'Just now',
       likesCount: 0,
@@ -1522,6 +1511,16 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
       _replyingToUsername = null;
       _replyingToComment = null;
     });
+
+    try {
+      await SupabaseDataService.addComment(
+        postId: widget.post.id,
+        content: text,
+        userId: user?.id,
+      );
+    } catch (e) {
+      debugPrint('Error saving comment to Supabase: $e');
+    }
   }
 
   @override

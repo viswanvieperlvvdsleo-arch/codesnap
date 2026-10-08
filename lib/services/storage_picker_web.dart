@@ -35,16 +35,58 @@ class StoragePickerWeb implements StoragePickerBase {
       final reader = html.FileReader();
       reader.readAsDataUrl(file);
       reader.onLoadEnd.listen((e) {
-        final result = reader.result as String;
-        final ext = file.name.contains('.') ? file.name.split('.').last.toLowerCase() : 'jpg';
-        if (!completer.isCompleted) {
-          completer.complete(PickedMediaResult(
-            pathOrDataUrl: result,
-            fileName: file.name,
-            fileSize: file.size,
-            mediaType: 'image',
-            extension: ext,
-          ));
+        final rawDataUrl = reader.result as String;
+        try {
+          final img = html.ImageElement();
+          img.src = rawDataUrl;
+          img.onLoad.listen((_) {
+            const maxDim = 1280;
+            var width = img.naturalWidth;
+            var height = img.naturalHeight;
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = (height * (maxDim / width)).round();
+                width = maxDim;
+              } else {
+                width = (width * (maxDim / height)).round();
+                height = maxDim;
+              }
+            }
+            final canvas = html.CanvasElement(width: width, height: height);
+            final ctx = canvas.context2D;
+            ctx.drawImageScaled(img, 0, 0, width, height);
+            final compressedDataUrl = canvas.toDataUrl('image/jpeg', 0.82);
+            if (!completer.isCompleted) {
+              completer.complete(PickedMediaResult(
+                pathOrDataUrl: compressedDataUrl,
+                fileName: file.name,
+                fileSize: compressedDataUrl.length,
+                mediaType: 'image',
+                extension: 'jpg',
+              ));
+            }
+          });
+          img.onError.listen((_) {
+            if (!completer.isCompleted) {
+              completer.complete(PickedMediaResult(
+                pathOrDataUrl: rawDataUrl,
+                fileName: file.name,
+                fileSize: file.size,
+                mediaType: 'image',
+                extension: file.name.contains('.') ? file.name.split('.').last.toLowerCase() : 'jpg',
+              ));
+            }
+          });
+        } catch (_) {
+          if (!completer.isCompleted) {
+            completer.complete(PickedMediaResult(
+              pathOrDataUrl: rawDataUrl,
+              fileName: file.name,
+              fileSize: file.size,
+              mediaType: 'image',
+              extension: file.name.contains('.') ? file.name.split('.').last.toLowerCase() : 'jpg',
+            ));
+          }
         }
       });
     });

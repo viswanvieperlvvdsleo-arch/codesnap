@@ -8,6 +8,7 @@ import '../providers/theme_provider.dart';
 import '../utils/app_animations.dart';
 import 'spring_button.dart';
 import '../screens/notifications_screen.dart';
+import '../screens/admin_dashboard_screen.dart';
 
 
 /// ─── Header ──────────────────────────────────────────────────────────────────
@@ -147,12 +148,16 @@ class _HeaderState extends State<Header> {
                         child: CircleAvatar(
                           radius: 18,
                           backgroundColor: Colors.white.withOpacity(0.15),
-                          backgroundImage: user?.avatarUrl != null
-                              ? NetworkImage(user!.avatarUrl)
+                          backgroundImage: (user != null && user.avatarUrl.isNotEmpty)
+                              ? NetworkImage(user.avatarUrl)
                               : null,
-                          child: user == null
-                              ? const Text('U',
-                                  style: TextStyle(color: Colors.white))
+                          child: (user == null || user.avatarUrl.isEmpty)
+                              ? Text(
+                                  (user?.name.isNotEmpty == true)
+                                      ? user!.name[0].toUpperCase()
+                                      : 'U',
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                )
                               : null,
                         ),
                         onSelected: (value) {
@@ -160,6 +165,11 @@ class _HeaderState extends State<Header> {
                             authProvider.logout();
                           } else if (value == 'profile') {
                             widget.onTabChanged(7);
+                          } else if (value == 'admin') {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+                            );
                           }
                         },
                         itemBuilder: (_) => [
@@ -190,6 +200,19 @@ class _HeaderState extends State<Header> {
                                   style: TextStyle(color: Colors.white)),
                             ]),
                           ),
+                          if (authProvider.isAdmin) ...[
+                            const PopupMenuDivider(color: Color(0x26FFFFFF)),
+                            const PopupMenuItem(
+                              value: 'admin',
+                              child: Row(children: [
+                                Icon(LucideIcons.shieldCheck,
+                                    size: 18, color: Color(0xFFFFD700)),
+                                SizedBox(width: 10),
+                                Text('Admin Console',
+                                    style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold)),
+                              ]),
+                            ),
+                          ],
                           const PopupMenuDivider(color: Color(0x26FFFFFF)),
                           const PopupMenuItem(
                             value: 'logout',

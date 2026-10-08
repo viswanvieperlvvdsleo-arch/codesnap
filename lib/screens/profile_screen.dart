@@ -6,12 +6,15 @@ import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/spring_button.dart';
 import '../widgets/accounts_list_modal.dart';
+import '../models/user_profile.dart';
 import '../utils/app_animations.dart';
 import '../utils/mock_data.dart';
 import 'user_profile_detail_screen.dart';
 import 'saved_posts_screen.dart';
 import '../widgets/morphing_capsule.dart';
 import '../services/payment_service.dart';
+import '../services/supabase_service.dart';
+import 'admin_dashboard_screen.dart';
 
 // ── Liquid Glass Color Tokens (Strict Glass Palette: Obsidian, White, Cyan) ──
 const _kBgDark        = Color(0xFF09090B);
@@ -154,16 +157,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final user = authProvider.currentUser;
+
     if (!_showingSettings) {
+      final realProfile = user != null
+          ? user.toUserProfile()
+          : UserProfile(
+              id: 'guest',
+              name: 'My Profile',
+              handle: '@developer',
+              avatarUrl: '',
+              bannerUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&q=80',
+              headline: '',
+              bio: '',
+              roleBadge: 'Developer',
+              followersCount: 0,
+              followingCount: 0,
+              postsCount: 0,
+            );
       return UserProfileDetailScreen(
-        user: MockData.selfUser,
+        user: realProfile,
         isSelf: true,
         onSettingsPressed: () => setState(() => _showingSettings = true),
       );
     }
-
-    final authProvider = Provider.of<AuthProvider>(context);
-    final user = authProvider.currentUser;
     final isDesktop = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
@@ -360,7 +378,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Row(
             children: [
-              // Avatar with Online dot and edit badge
+              // Avatar with Online dot and clean fallback
               Stack(
                 children: [
                   Container(
@@ -369,13 +387,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(color: _kGlassHighlight, width: 2),
-                      image: DecorationImage(
-                        image: NetworkImage(
-                          user?.avatarUrl ??
-                              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80',
-                        ),
-                        fit: BoxFit.cover,
-                      ),
+                      color: _kGlassElevated,
+                    ),
+                    child: ClipOval(
+                      child: (user?.avatarUrl != null && (user!.avatarUrl as String).isNotEmpty)
+                          ? Image.network(
+                              user!.avatarUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const Icon(LucideIcons.user, color: Colors.white70, size: 36),
+                            )
+                          : const Icon(LucideIcons.user, color: Colors.white70, size: 36),
                     ),
                   ),
                   Positioned(
@@ -404,7 +425,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         Flexible(
                           child: Text(
-                            user?.name ?? 'Alex Johnson',
+                            (user?.name != null && (user!.name as String).isNotEmpty)
+                                ? user!.name
+                                : (user?.email != null && (user!.email as String).isNotEmpty
+                                    ? user!.email.split('@').first
+                                    : 'Developer'),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 18,
@@ -415,12 +440,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                         ),
                         const SizedBox(width: 6),
-                        const Icon(Icons.verified, color: Colors.white, size: 15),
+                        const Icon(Icons.verified, color: _kAccentCyan, size: 15),
                       ],
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      user?.email ?? 'alex.j@codesnap.dev',
+                      user?.email ?? 'Logged in via Supabase',
                       style: const TextStyle(
                         color: Color(0xFF888899),
                         fontSize: 12.5,
@@ -436,9 +461,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         border: Border.all(color: _kGlassBorder),
                       ),
                       child: Text(
-                        user?.section != null
-                            ? 'Dept: CSE · Section ${user!.section}'
-                            : 'Core Contributor · CSE 3rd Yr',
+                        (user?.section != null && (user!.section as String).isNotEmpty)
+                            ? '@${user!.section}'
+                            : (user?.department != null && (user!.department as String).isNotEmpty
+                                ? user!.department
+                                : 'Developer · CodeSnap'),
                         style: const TextStyle(
                           color: _kAccentCyan,
                           fontSize: 10.5,
@@ -451,7 +478,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
+          SpringButton(
+            onTap: () {
+              if (widget.isSettingsOnly && Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              } else {
+                setState(() => _showingSettings = false);
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              decoration: BoxDecoration(
+                color: _kAccentCyan.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _kAccentCyan.withOpacity(0.4)),
+              ),
+              alignment: Alignment.center,
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(LucideIcons.userCheck, size: 14, color: _kAccentCyan),
+                  SizedBox(width: 8),
+                  Text(
+                    'Customize Profile & Set Bio',
+                    style: TextStyle(
+                      color: _kAccentCyan,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
 
           // Snapped (Followers) & Snapping (Following) Social Stats
           Container(
@@ -1362,6 +1423,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         children: [
+          // Account & Security Details
+          _buildTileRow(
+            label: 'Email Address',
+            subtitle: (authProvider.currentUser?.email != null && authProvider.currentUser!.email.isNotEmpty)
+                ? authProvider.currentUser!.email
+                : 'No active session',
+            trailing: const Icon(LucideIcons.mail, color: _kAccentCyan, size: 16),
+          ),
+          const Divider(color: _kGlassBorder, height: 1),
+          _buildTileRow(
+            label: 'Username',
+            subtitle: (authProvider.currentUser?.section != null && authProvider.currentUser!.section!.isNotEmpty)
+                ? '@${authProvider.currentUser!.section}'
+                : (authProvider.currentUser?.name != null && authProvider.currentUser!.name.isNotEmpty
+                    ? '@${authProvider.currentUser!.name.toLowerCase().replaceAll(' ', '')}'
+                    : '@developer'),
+            trailing: const Icon(LucideIcons.user, color: Color(0xFF888899), size: 16),
+          ),
+          const Divider(color: _kGlassBorder, height: 1),
+          _buildTileRow(
+            label: 'Account Status',
+            subtitle: 'Active Developer Account',
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withOpacity(0.18),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text('VERIFIED', style: TextStyle(color: Color(0xFF10B981), fontSize: 9.5, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const Divider(color: _kGlassBorder, height: 1),
+          if (authProvider.isAdmin) ...[
+            _buildTileRow(
+              label: 'Admin Command Center',
+              subtitle: 'Manage telemetry, reported content & broadcasts',
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFD700).withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.5)),
+                ),
+                child: const Text('👑 ADMIN', style: TextStyle(color: Color(0xFFFFD700), fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+                );
+              },
+            ),
+            const Divider(color: _kGlassBorder, height: 1),
+          ],
           _buildSwitchTile(
             label: 'Two-Factor Authentication (2FA)',
             subtitle: 'Secure sign-ins with authenticator app or biometric key',
@@ -1373,17 +1488,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const Divider(color: _kGlassBorder, height: 1),
           _buildTileRow(
-            label: 'Active Sessions & Devices',
-            subtitle: '2 active devices (Windows PC, Android Phone)',
-            trailing: const Icon(LucideIcons.chevronRight, color: Color(0xFF888899), size: 16),
-            onTap: () => _showGlassToast('Managing active devices'),
-          ),
-          const Divider(color: _kGlassBorder, height: 1),
-          _buildTileRow(
             label: 'Change Password',
-            subtitle: 'Last updated 3 months ago',
+            subtitle: 'Send password reset link to your email',
             trailing: const Icon(LucideIcons.chevronRight, color: Color(0xFF888899), size: 16),
-            onTap: () => _showGlassToast('Password reset link sent to your email'),
+            onTap: () async {
+              final email = authProvider.currentUser?.email;
+              if (email != null && email.isNotEmpty) {
+                try {
+                  await SupabaseService.client.auth.resetPasswordForEmail(email);
+                  _showGlassToast('Password reset link sent to $email', icon: LucideIcons.mail, isSuccess: true);
+                } catch (e) {
+                  _showGlassToast('Could not send reset link: $e', icon: LucideIcons.alertTriangle, isSuccess: false);
+                }
+              }
+            },
           ),
           const Divider(color: _kGlassBorder, height: 1),
           _buildTileRow(

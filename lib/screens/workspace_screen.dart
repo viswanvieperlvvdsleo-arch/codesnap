@@ -16,6 +16,8 @@ import '../services/terminal_service.dart';
 import '../services/live_server_service.dart';
 import 'chat_screen.dart';
 import '../widgets/spring_button.dart';
+import '../services/supabase_service.dart';
+import '../services/supabase_data_service.dart';
 
 // ── Glass Theme Constants ──────────────────────────────────────────────────────
 class _G {
@@ -335,6 +337,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     final content = _inMemoryFiles[_activePath] ?? _activeCode;
     await WorkspaceService.writeFile(_activePath, content);
     if (mounted) setState(() => _hasUnsaved = false);
+    if (SupabaseService.isAuthenticated) {
+      final projectName = _workspaceRoot?.split(RegExp(r'[\\/]')).last ?? 'DefaultProject';
+      SupabaseDataService.saveWorkspaceProject(
+        projectName: projectName,
+        files: {_activeFile: content},
+      );
+    }
   }
 
   Future<void> _refreshTree() async {

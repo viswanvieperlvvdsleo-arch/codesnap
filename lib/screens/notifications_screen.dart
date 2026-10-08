@@ -8,6 +8,8 @@ import '../utils/mock_data.dart';
 import 'user_profile_detail_screen.dart';
 import 'chat_screen.dart';
 import 'individual_chat_screen.dart';
+import '../services/supabase_service.dart';
+import '../services/supabase_data_service.dart';
 
 // ── Liquid Glass Color Tokens ────────────────────────────────────────────────
 const _kBgDark        = Color(0xFF09090B);
@@ -477,7 +479,25 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Widget _buildNotificationCard(NotificationItem item) {
-    return GestureDetector(
+    return Dismissible(
+      key: Key(item.id),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) {
+        setState(() => _notifications.remove(item));
+        if (SupabaseService.isAuthenticated) {
+          SupabaseDataService.deleteNotification(item.id);
+        }
+      },
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(LucideIcons.trash2, color: Colors.redAccent, size: 20),
+      ),
+      child: GestureDetector(
       onTap: () => _handleNotificationTap(item),
       child: Container(
       margin: const EdgeInsets.symmetric(vertical: 5),
@@ -595,6 +615,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ],
       ),
     ),
+      ),
     );
   }
 }

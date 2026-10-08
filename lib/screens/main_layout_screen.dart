@@ -105,89 +105,120 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
     });
   }
 
-  // ── Screens ─────────────────────────────────────────────────────────────
-  List<Widget> get _screens => [
-    const HomeFeedScreen(),
-    ChatScreen(
-      isExpanded: _isChatExpanded,
-      onToggleExpand: (expanded) {
-        setState(() => _isChatExpanded = expanded);
-      },
-      onActiveConversationChanged: (active) {
-        if (mounted) setState(() => _isInsideChatConversation = active);
-      },
-    ),
-    const PeopleScreen(),
-    TasksScreen(
-      onOpenTaskInWorkspace: (id) => _navigateToTab(6, taskId: id),
-    ),
-    const NotesScreen(),
-    ProjectsScreen(
-      onOpenProjectInWorkspace: (id) => _navigateToTab(6, projectId: id),
-    ),
-    WorkspaceScreen(
-      initialTaskId: _selectedTaskId,
-      initialProjectId: _selectedProjectId,
-      onClearSelection: () {
-        _selectedTaskId = null;
-        _selectedProjectId = null;
-      },
-    ),
-    const ProfileScreen(),
-  ];
+  // ── Persistent Screens (State preserved across all tab switches) ───────────
+  final Widget _homeFeedScreen = const HomeFeedScreen();
+  final Widget _peopleScreen = const PeopleScreen();
+  final Widget _notesScreen = const NotesScreen();
+  final Widget _profileScreen = const ProfileScreen();
 
   /// Content builder that handles Windows desktop split view vs Mobile separate pages
+  /// Wrapped in IndexedStack so posts, scroll positions, and input states are NEVER lost when switching tabs!
   Widget _buildContent(bool isDesktop) {
-    // Windows / Desktop Split View:
-    // If on desktop and either Home (0) or Chat (1) is selected:
-    if (isDesktop && (_currentIndex == 0 || _currentIndex == 1)) {
-      if (_isChatExpanded) {
-        // Expand mode: In place of the feed, show the full chat page with contacts on the left and active chat on the right!
-        return ChatScreen(
-          isEmbedded: false,
-          isExpanded: true,
+    if (isDesktop) {
+      final int activeDesktopIndex = (_currentIndex == 0 || _currentIndex == 1)
+          ? (_isChatExpanded ? 1 : 0)
+          : _currentIndex;
+
+      return IndexedStack(
+        index: activeDesktopIndex,
+        children: [
+          // 0: Desktop Split view (Chat panel on left, Home Feed on right)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 390,
+                child: ChatScreen(
+                  isEmbedded: true,
+                  isExpanded: false,
+                  onToggleExpand: (expanded) {
+                    setState(() => _isChatExpanded = expanded);
+                  },
+                  onActiveConversationChanged: (active) {
+                    if (mounted) setState(() => _isInsideChatConversation = active);
+                  },
+                ),
+              ),
+              Container(
+                width: 1,
+                color: const Color(0x26FFFFFF),
+              ),
+              Expanded(
+                child: _homeFeedScreen,
+              ),
+            ],
+          ),
+          // 1: Expanded full Chat mode
+          ChatScreen(
+            isEmbedded: false,
+            isExpanded: true,
+            onToggleExpand: (expanded) {
+              setState(() => _isChatExpanded = expanded);
+            },
+            onActiveConversationChanged: (active) {
+              if (mounted) setState(() => _isInsideChatConversation = active);
+            },
+          ),
+          // 2: People / Community
+          _peopleScreen,
+          // 3: Tasks
+          TasksScreen(
+            onOpenTaskInWorkspace: (id) => _navigateToTab(6, taskId: id),
+          ),
+          // 4: Notes
+          _notesScreen,
+          // 5: Projects
+          ProjectsScreen(
+            onOpenProjectInWorkspace: (id) => _navigateToTab(6, projectId: id),
+          ),
+          // 6: Workspace
+          WorkspaceScreen(
+            initialTaskId: _selectedTaskId,
+            initialProjectId: _selectedProjectId,
+            onClearSelection: () {
+              _selectedTaskId = null;
+              _selectedProjectId = null;
+            },
+          ),
+          // 7: Profile
+          _profileScreen,
+        ],
+      );
+    }
+
+    // Mobile Phone view (IndexedStack preserves all tabs)
+    return IndexedStack(
+      index: _currentIndex,
+      children: [
+        _homeFeedScreen,
+        ChatScreen(
+          isExpanded: _isChatExpanded,
           onToggleExpand: (expanded) {
             setState(() => _isChatExpanded = expanded);
           },
           onActiveConversationChanged: (active) {
             if (mounted) setState(() => _isInsideChatConversation = active);
           },
-        );
-      } else {
-        // Normal desktop split: Chat panel on left, Home Feed on right
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Left: Chat Page / Panel
-            SizedBox(
-              width: 390,
-              child: ChatScreen(
-                isEmbedded: true,
-                isExpanded: false,
-                onToggleExpand: (expanded) {
-                  setState(() => _isChatExpanded = expanded);
-                },
-                onActiveConversationChanged: (active) {
-                  if (mounted) setState(() => _isInsideChatConversation = active);
-                },
-              ),
-            ),
-            // Clean glass vertical divider
-            Container(
-              width: 1,
-              color: const Color(0x26FFFFFF),
-            ),
-            // Right: Home Feed
-            const Expanded(
-              child: HomeFeedScreen(),
-            ),
-          ],
-        );
-      }
-    }
-
-    // On mobile (or other tabs like Tasks, Learn, Workspace, Profile on desktop):
-    return _screens[_currentIndex];
+        ),
+        _peopleScreen,
+        TasksScreen(
+          onOpenTaskInWorkspace: (id) => _navigateToTab(6, taskId: id),
+        ),
+        _notesScreen,
+        ProjectsScreen(
+          onOpenProjectInWorkspace: (id) => _navigateToTab(6, projectId: id),
+        ),
+        WorkspaceScreen(
+          initialTaskId: _selectedTaskId,
+          initialProjectId: _selectedProjectId,
+          onClearSelection: () {
+            _selectedTaskId = null;
+            _selectedProjectId = null;
+          },
+        ),
+        _profileScreen,
+      ],
+    );
   }
 
   @override
