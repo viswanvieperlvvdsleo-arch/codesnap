@@ -186,7 +186,18 @@ class AuthProvider with ChangeNotifier {
         fullName: displayName,
       );
 
-      if (res.user != null) {
+      if (res.user != null && res.session == null) {
+        // Supabase created the user, but email verification is still required.
+        // Do not unlock protected screens without a real authenticated session.
+        _currentUser = null;
+        _errorMessage =
+            'Registration succeeded. Confirm your email, then sign in.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+
+      if (res.user != null && res.session != null) {
         _currentUser = User(
           id: res.user!.id,
           name: displayName,

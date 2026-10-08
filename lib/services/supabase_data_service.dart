@@ -132,8 +132,11 @@ class SupabaseDataService {
     List<String>? skills,
   }) async {
     final user = _client.auth.currentUser;
-    final targetId = userId ?? user?.id;
-    if (targetId == null) return null;
+    // Never write to another user's profile from a client session.
+    if (user == null || (userId != null && userId != user.id)) {
+      throw StateError('An authenticated matching user is required.');
+    }
+    final targetId = user.id;
 
     String? persistedAvatar = avatarUrl;
     if (avatarUrl != null &&
@@ -187,11 +190,12 @@ class SupabaseDataService {
     if (githubHandle != null) tableUpdates['github_handle'] = githubHandle;
     if (skills != null) tableUpdates['skills'] = skills;
 
-    try {
-      await _client.from(SupabaseService.tableProfiles).upsert(tableUpdates);
-    } catch (e) {
-      debugPrint('Supabase profiles upsert error: $e');
-    }
+    // The auth.users trigger already creates profiles. A partial upsert
+    // attempts an INSERT without the required username and returns HTTP 400.
+    await _client
+        .from(SupabaseService.tableProfiles)
+        .update(tableUpdates)
+        .eq('id', targetId);
     return persistedAvatar;
   }
 
@@ -332,16 +336,16 @@ class SupabaseDataService {
     final uid = authUid;
     final resolvedPostId = postId != null && _isUuid(postId) ? postId : null;
 
-    // Ensure author profile exists in profiles table so foreign key constraint NEVER fails
-    try {
-      await _client.from(SupabaseService.tableProfiles).upsert({
-        'id': uid,
-        'username': authorUsername ?? 'developer',
-        'full_name': authorFullName ?? 'Developer',
-        'avatar_url': authorAvatar ?? '',
-      });
-    } catch (e) {
-      debugPrint('Supabase profile ensure warning: $e');
+    // The signup trigger owns profile creation. Upserting here can overwrite
+    // the user's existing username or fail with a unique-key HTTP 400.
+    final authorProfile = await _client
+        .from(SupabaseService.tableProfiles)
+        .select('id')
+        .eq('id', uid)
+        .maybeSingle();
+    if (authorProfile == null) {
+      debugPrint('Cannot post: authenticated user has no profile row.');
+      return null;
     }
 
     try {

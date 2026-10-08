@@ -31,7 +31,10 @@ class SupabaseService {
       _initialized = true;
       debugPrint('⚡ Supabase successfully connected to: $supabaseUrl');
     } catch (e) {
-      debugPrint('⚠️ Supabase initialization warning: $e');
+      // Initialization failures must not be silently ignored: otherwise the
+      // login screen loads with an unusable client and misleading network errors.
+      debugPrint('Supabase initialization failed: $e');
+      rethrow;
     }
   }
 
