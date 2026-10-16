@@ -134,11 +134,14 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
 
       final loaded = data.map((item) {
         final profile = item['profiles'] as Map<String, dynamic>?;
-        final uname = profile?['username'] ?? profile?['full_name'] ?? 'developer';
-        final avatar = (profile?['avatar_url'] != null && (profile!['avatar_url'] as String).isNotEmpty)
+        final uname =
+            profile?['username'] ?? profile?['full_name'] ?? 'developer';
+        final avatar = (profile?['avatar_url'] != null &&
+                (profile!['avatar_url'] as String).isNotEmpty)
             ? profile['avatar_url'] as String
             : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80';
-        final isSelf = (item['user_id'] != null && item['user_id'] == currentUserId);
+        final isSelf =
+            (item['user_id'] != null && item['user_id'] == currentUserId);
 
         final createdAt = item['created_at'] != null
             ? DateTime.tryParse(item['created_at'].toString())
@@ -232,7 +235,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
               ],
             ),
             borderRadius: BorderRadius.circular(radius),
-            border: Border.all(color: Colors.white.withOpacity(0.20), width: 0.8),
+            border:
+                Border.all(color: Colors.white.withOpacity(0.20), width: 0.8),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.12),
@@ -377,47 +381,63 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
         const double gap = 8.0;
 
         // Subtract safe buffer of 2.0 to eliminate subpixel 0.0000244 / 0.0115px overflow
-        final double maxWDesc  = (totalW - shrunkW - gap - 2.0).floorToDouble();
-        final double maxWMusic = (totalW - shrunkW * 2 - gap * 2 - 2.0).floorToDouble();
-        final double maxWMore  = (totalW - shrunkW - gap - 2.0).floorToDouble();
+        final double maxWDesc = (totalW - shrunkW - gap - 2.0).floorToDouble();
+        final double maxWMusic =
+            (totalW - shrunkW * 2 - gap * 2 - 2.0).floorToDouble();
+        final double maxWMore = (totalW - shrunkW - gap - 2.0).floorToDouble();
 
-        double wDesc  = _focusedCardIndex == 0 ? maxWDesc  : (_focusedCardIndex == 1 ? shrunkW : 0);
-        double wMusic = _focusedCardIndex == 0 ? shrunkW   : (_focusedCardIndex == 1 ? maxWMusic : shrunkW);
-        double wMore  = _focusedCardIndex == 0 ? 0         : (_focusedCardIndex == 1 ? shrunkW : maxWMore);
+        double wDesc = _focusedCardIndex == 0
+            ? maxWDesc
+            : (_focusedCardIndex == 1 ? shrunkW : 0);
+        double wMusic = _focusedCardIndex == 0
+            ? shrunkW
+            : (_focusedCardIndex == 1 ? maxWMusic : shrunkW);
+        double wMore = _focusedCardIndex == 0
+            ? 0
+            : (_focusedCardIndex == 1 ? shrunkW : maxWMore);
 
-        double hDesc  = _focusedCardIndex == 0 ? 110.0 : 64.0;
+        double hDesc = _focusedCardIndex == 0 ? 110.0 : 64.0;
         double hMusic = _focusedCardIndex == 1 ? 110.0 : 64.0;
-        double hMore  = _focusedCardIndex == 2 ? 110.0 : 64.0;
+        double hMore = _focusedCardIndex == 2 ? 110.0 : 64.0;
 
         if (_isDraggingHorizontal && _horizontalDragOffset != 0) {
           double shift = _horizontalDragOffset;
-          double maxWDescDelta  = maxWDesc  - shrunkW;
-          double maxWMoreDelta  = maxWMore  - shrunkW;
+          double maxWDescDelta = maxWDesc - shrunkW;
+          double maxWMoreDelta = maxWMore - shrunkW;
 
           if (_focusedCardIndex == 0 && shift < 0) {
             double amt = (-shift).clamp(0.0, maxWDescDelta);
             double hAmt = amt * (46.0 / maxWDescDelta);
-            wDesc -= amt; wMusic += amt;
-            hDesc -= hAmt; hMusic += hAmt;
+            wDesc -= amt;
+            wMusic += amt;
+            hDesc -= hAmt;
+            hMusic += hAmt;
           } else if (_focusedCardIndex == 1 && shift > 0) {
             double amt = shift.clamp(0.0, maxWDescDelta);
             double hAmt = amt * (46.0 / maxWDescDelta);
-            wMusic -= amt; wDesc += amt;
-            hMusic -= hAmt; hDesc += hAmt;
+            wMusic -= amt;
+            wDesc += amt;
+            hMusic -= hAmt;
+            hDesc += hAmt;
           } else if (_focusedCardIndex == 1 && shift < 0) {
             double amt = (-shift).clamp(0.0, maxWMoreDelta);
             double hAmt = amt * (46.0 / maxWMoreDelta);
-            wMusic -= amt; wMore += amt;
-            hMusic -= hAmt; hMore += hAmt;
+            wMusic -= amt;
+            wMore += amt;
+            hMusic -= hAmt;
+            hMore += hAmt;
           } else if (_focusedCardIndex == 2 && shift > 0) {
             double amt = shift.clamp(0.0, maxWMoreDelta);
             double hAmt = amt * (46.0 / maxWMoreDelta);
-            wMore -= amt; wMusic += amt;
-            hMore -= hAmt; hMusic += hAmt;
+            wMore -= amt;
+            wMusic += amt;
+            hMore -= hAmt;
+            hMusic += hAmt;
           }
         }
 
-        Duration currentDuration = _isDraggingHorizontal ? Duration.zero : AppAnimations.standard;
+        Duration currentDuration =
+            _isDraggingHorizontal ? Duration.zero : AppAnimations.standard;
 
         return Container(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
@@ -444,7 +464,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                             _changeMode(UIMode.fullScreen);
                             _fullScreenPageIndex = 0;
                             _verticalDismissY = 0;
-                            if (_pageController.hasClients) _pageController.jumpToPage(0);
+                            if (_pageController.hasClients)
+                              _pageController.jumpToPage(0);
                           },
                           child: AnimatedContainer(
                             duration: currentDuration,
@@ -458,7 +479,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                                   padding: const EdgeInsets.all(12),
                                   child: (wDesc > 150 && hDesc > 80)
                                       ? Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               widget.post.captionTitle,
@@ -475,7 +497,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                                               child: Text(
                                                 widget.post.captionBody,
                                                 style: TextStyle(
-                                                  color: Colors.white.withOpacity(0.85),
+                                                  color: Colors.white
+                                                      .withOpacity(0.85),
                                                   fontSize: 12,
                                                 ),
                                                 maxLines: 2,
@@ -488,29 +511,36 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                                                 const SizedBox(width: 8),
                                                 Expanded(
                                                   child: Text(
-                                                    widget.post.likesCount > 0 ? '${widget.post.likesCount} ${widget.post.likesCount == 1 ? "like" : "likes"}' : 'No likes yet',
+                                                    widget.post.likesCount > 0
+                                                        ? '${widget.post.likesCount} ${widget.post.likesCount == 1 ? "like" : "likes"}'
+                                                        : 'No likes yet',
                                                     style: TextStyle(
-                                                      color: Colors.white.withOpacity(0.7),
+                                                      color: Colors.white
+                                                          .withOpacity(0.7),
                                                       fontSize: 10,
                                                     ),
                                                     maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
                                                   ),
                                                 ),
                                                 Icon(LucideIcons.chevronRight,
-                                                    color: Colors.white.withOpacity(0.7), size: 14),
+                                                    color: Colors.white
+                                                        .withOpacity(0.7),
+                                                    size: 14),
                                               ],
                                             )
                                           ],
                                         )
-                                      : const Center(child: Icon(LucideIcons.alignLeft, color: Colors.white)),
+                                      : const Center(
+                                          child: Icon(LucideIcons.alignLeft,
+                                              color: Colors.white)),
                                 ),
                               ),
                             ),
                           ),
                         ),
                       if (wDesc > 0) const SizedBox(width: gap),
-
                       if (wMusic > 0)
                         AnimatedContainer(
                           duration: currentDuration,
@@ -526,22 +556,31 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                                     ? Row(
                                         children: [
                                           ClipRRect(
-                                            borderRadius: BorderRadius.circular(16),
+                                            borderRadius:
+                                                BorderRadius.circular(16),
                                             child: Image.network(
                                               widget.post.musicCoverUrl,
-                                              width: 72, height: 72, fit: BoxFit.cover,
-                                              errorBuilder: (_, __, ___) => Container(
-                                                width: 72, height: 72,
+                                              width: 72,
+                                              height: 72,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  Container(
+                                                width: 72,
+                                                height: 72,
                                                 color: Colors.white10,
-                                                child: const Icon(LucideIcons.music, color: Colors.white38),
+                                                child: const Icon(
+                                                    LucideIcons.music,
+                                                    color: Colors.white38),
                                               ),
                                             ),
                                           ),
                                           const SizedBox(width: 12),
                                           Expanded(
                                             child: Column(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
                                                 Text(
                                                   widget.post.musicTitle,
@@ -551,16 +590,19 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                                                     fontSize: 14,
                                                   ),
                                                   maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                 ),
                                                 Text(
                                                   widget.post.musicArtist,
                                                   style: TextStyle(
-                                                    color: Colors.white.withOpacity(0.7),
+                                                    color: Colors.white
+                                                        .withOpacity(0.7),
                                                     fontSize: 12,
                                                   ),
                                                   maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                 ),
                                               ],
                                             ),
@@ -569,14 +611,22 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                                       )
                                     : Center(
                                         child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
                                           child: Image.network(
                                             widget.post.musicCoverUrl,
-                                            width: 44, height: 44, fit: BoxFit.cover,
-                                            errorBuilder: (_, __, ___) => Container(
-                                              width: 44, height: 44,
+                                            width: 44,
+                                            height: 44,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (_, __, ___) =>
+                                                Container(
+                                              width: 44,
+                                              height: 44,
                                               color: Colors.white10,
-                                              child: const Icon(LucideIcons.music, color: Colors.white38, size: 20),
+                                              child: const Icon(
+                                                  LucideIcons.music,
+                                                  color: Colors.white38,
+                                                  size: 20),
                                             ),
                                           ),
                                         ),
@@ -586,7 +636,6 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                           ),
                         ),
                       if (wMore > 0 && wMusic > 0) const SizedBox(width: gap),
-
                       if (wMore > 0)
                         GestureDetector(
                           onTap: widget.onSaveToggled,
@@ -600,7 +649,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                               child: ClipRect(
                                 child: (wMore > 120 && hMore > 80)
                                     ? Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
                                         children: [
                                           Icon(
                                             widget.isSaved
@@ -670,194 +720,232 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
   // --- Full Screen Overlays with Hand-Movement Morphing & Horizontal Swipe ---
   Widget _buildFullScreen() {
     final double currentDismiss = _verticalDismissY;
-    final double scaleRatio = (1.0 - (currentDismiss / 1400.0)).clamp(0.90, 1.0);
-    final double glassOpacity = (0.06 * (1.0 - currentDismiss / 350.0)).clamp(0.02, 0.06);
+    final double scaleRatio =
+        (1.0 - (currentDismiss / 1400.0)).clamp(0.90, 1.0);
+    final double glassOpacity =
+        (0.06 * (1.0 - currentDismiss / 350.0)).clamp(0.02, 0.06);
+    final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
       child: Container(
-      color: Colors.black.withOpacity((0.04 * (1.0 - currentDismiss / 400.0)).clamp(0.0, 0.04)),
-      child: AnimatedContainer(
-        duration: _isDraggingDismiss ? Duration.zero : AppAnimations.standard,
-        curve: Curves.easeOutCubic,
-        transform: Matrix4.translationValues(0, currentDismiss, 0)..scale(scaleRatio),
-        child: _buildGlass(
-          opacity: glassOpacity,
-          radius: 28,
-          blur: 7.0,
-          child: SafeArea(
-            child: Column(
-              children: [
-                // ── Top Header & Interactive Hand Drag Area ───────────────────
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onVerticalDragStart: (_) {
-                    setState(() => _isDraggingDismiss = true);
-                  },
-                  onVerticalDragUpdate: (d) {
-                    if (d.delta.dy > 0 || _verticalDismissY > 0) {
-                      setState(() {
-                        _verticalDismissY = (_verticalDismissY + d.delta.dy).clamp(0.0, 450.0);
-                      });
-                    }
-                  },
-                  onVerticalDragEnd: (d) {
-                    _isDraggingDismiss = false;
-                    final vel = d.primaryVelocity ?? 0;
-                    if (_verticalDismissY > 75 || vel > 250) {
-                      // Hand movement dismiss: morphs back down!
-                      _changeMode(UIMode.snippet);
-                      _verticalDismissY = 0;
-                    } else {
-                      // Spring back to top
-                      setState(() {
-                        _verticalDismissY = 0;
-                      });
-                    }
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                    child: Column(
-                      children: [
-                        // Hand Drag Handle
-                        Center(
-                          child: Container(
-                            width: 44,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.6),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Title Bar with Mode Capsule & Close Button
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        color: Colors.black.withOpacity(
+            (0.04 * (1.0 - currentDismiss / 400.0)).clamp(0.0, 0.04)),
+        child: AnimatedPadding(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: EdgeInsets.only(bottom: keyboardInset),
+          child: AnimatedContainer(
+            duration:
+                _isDraggingDismiss ? Duration.zero : AppAnimations.standard,
+            curve: Curves.easeOutCubic,
+            transform: Matrix4.translationValues(0, currentDismiss, 0)
+              ..scale(scaleRatio),
+            child: _buildGlass(
+              opacity: glassOpacity,
+              radius: 28,
+              blur: 7.0,
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    // ── Top Header & Interactive Hand Drag Area ───────────────────
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onVerticalDragStart: (_) {
+                        setState(() => _isDraggingDismiss = true);
+                      },
+                      onVerticalDragUpdate: (d) {
+                        if (d.delta.dy > 0 || _verticalDismissY > 0) {
+                          setState(() {
+                            _verticalDismissY = (_verticalDismissY + d.delta.dy)
+                                .clamp(0.0, 450.0);
+                          });
+                        }
+                      },
+                      onVerticalDragEnd: (d) {
+                        _isDraggingDismiss = false;
+                        final vel = d.primaryVelocity ?? 0;
+                        if (_verticalDismissY > 75 || vel > 250) {
+                          // Hand movement dismiss: morphs back down!
+                          _changeMode(UIMode.snippet);
+                          _verticalDismissY = 0;
+                        } else {
+                          // Spring back to top
+                          setState(() {
+                            _verticalDismissY = 0;
+                          });
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: Column(
                           children: [
-                            // Interactive Fluid Morphing Segmented Switch
-                            Container(
-                              padding: const EdgeInsets.all(3),
-                              decoration: BoxDecoration(
-                                color: const Color(0x1AFFFFFF),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: const Color(0x26FFFFFF)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () => _animateToPage(0),
-                                    child: AnimatedContainer(
-                                      duration: AppAnimations.quick,
-                                      curve: AppAnimations.snappy,
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: _fullScreenPageIndex == 0 ? const Color(0x38FFFFFF) : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: _fullScreenPageIndex == 0 ? Border.all(color: const Color(0x33FFFFFF)) : null,
-                                      ),
-                                      child: Text(
-                                        'Story',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 11.5,
-                                          fontWeight: _fullScreenPageIndex == 0 ? FontWeight.w800 : FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => _animateToPage(1),
-                                    child: AnimatedContainer(
-                                      duration: AppAnimations.quick,
-                                      curve: AppAnimations.snappy,
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: _fullScreenPageIndex == 1 ? const Color(0x38FFFFFF) : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: _fullScreenPageIndex == 1 ? Border.all(color: const Color(0x33FFFFFF)) : null,
-                                      ),
-                                      child: Text(
-                                        'Comments (${widget.post.commentsCount})',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 11.5,
-                                          fontWeight: _fullScreenPageIndex == 1 ? FontWeight.w800 : FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                            // Hand Drag Handle
+                            Center(
+                              child: Container(
+                                width: 44,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.6),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
                               ),
                             ),
+                            const SizedBox(height: 12),
 
-                            // Close Button
-                            SpringButton(
-                              onTap: () => _changeMode(UIMode.snippet),
-                              child: Container(
-                                padding: const EdgeInsets.all(7),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.18),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white.withOpacity(0.24)),
+                            // Title Bar with Mode Capsule & Close Button
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                // Interactive Fluid Morphing Segmented Switch
+                                Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0x1AFFFFFF),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                        color: const Color(0x26FFFFFF)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      GestureDetector(
+                                        onTap: () => _animateToPage(0),
+                                        child: AnimatedContainer(
+                                          duration: AppAnimations.quick,
+                                          curve: AppAnimations.snappy,
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: _fullScreenPageIndex == 0
+                                                ? const Color(0x38FFFFFF)
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            border: _fullScreenPageIndex == 0
+                                                ? Border.all(
+                                                    color:
+                                                        const Color(0x33FFFFFF))
+                                                : null,
+                                          ),
+                                          child: Text(
+                                            'Story',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11.5,
+                                              fontWeight:
+                                                  _fullScreenPageIndex == 0
+                                                      ? FontWeight.w800
+                                                      : FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: () => _animateToPage(1),
+                                        child: AnimatedContainer(
+                                          duration: AppAnimations.quick,
+                                          curve: AppAnimations.snappy,
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: _fullScreenPageIndex == 1
+                                                ? const Color(0x38FFFFFF)
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            border: _fullScreenPageIndex == 1
+                                                ? Border.all(
+                                                    color:
+                                                        const Color(0x33FFFFFF))
+                                                : null,
+                                          ),
+                                          child: Text(
+                                            'Comments (${widget.post.commentsCount})',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11.5,
+                                              fontWeight:
+                                                  _fullScreenPageIndex == 1
+                                                      ? FontWeight.w800
+                                                      : FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                child: const Icon(Icons.close, color: Colors.white, size: 18),
-                              ),
+
+                                // Close Button
+                                SpringButton(
+                                  onTap: () => _changeMode(UIMode.snippet),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(7),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.18),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                          color:
+                                              Colors.white.withOpacity(0.24)),
+                                    ),
+                                    child: const Icon(Icons.close,
+                                        color: Colors.white, size: 18),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // ── Swipeable & Morphing Content (Description <-> Comments) ──
-                Expanded(
-                  child: ScrollConfiguration(
-                    behavior: const _AppScrollBehavior(),
-                    child: PageView(
-                      controller: _pageController,
-                      physics: const BouncingScrollPhysics(),
-                      onPageChanged: (index) {
-                        setState(() => _fullScreenPageIndex = index);
-                      },
-                      children: [
-                        _buildFullDescription(),
-                        _buildCommentsList(),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // ── Page Indicator (Interactive Fluid Dots) ───────────────────
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 18, top: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      GestureDetector(
-                        onTap: () => _animateToPage(0),
-                        child: _buildDot(_fullScreenPageIndex == 0),
                       ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () => _animateToPage(1),
-                        child: _buildDot(_fullScreenPageIndex == 1),
+                    ),
+
+                    // ── Swipeable & Morphing Content (Description <-> Comments) ──
+                    Expanded(
+                      child: ScrollConfiguration(
+                        behavior: const _AppScrollBehavior(),
+                        child: PageView(
+                          controller: _pageController,
+                          physics: const BouncingScrollPhysics(),
+                          onPageChanged: (index) {
+                            setState(() => _fullScreenPageIndex = index);
+                          },
+                          children: [
+                            _buildFullDescription(),
+                            _buildCommentsList(),
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
+                    ),
+
+                    // ── Page Indicator (Interactive Fluid Dots) ───────────────────
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 18, top: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: () => _animateToPage(0),
+                            child: _buildDot(_fullScreenPageIndex == 0),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () => _animateToPage(1),
+                            child: _buildDot(_fullScreenPageIndex == 1),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildDot(bool isActive) {
     return AnimatedContainer(
@@ -902,18 +990,23 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
     );
   }
 
-  void _showCommentOptionsMenu(CommentItem comment, {CommentItem? parentComment}) {
+  void _showCommentOptionsMenu(CommentItem comment,
+      {CommentItem? parentComment}) {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final currentUser = auth.currentUser;
     final currentUsername = currentUser?.name.toLowerCase() ?? 'alexj';
 
     // ── 3 Roles Allowed to Delete: 1) Owner of Post, 2) Author of Comment, 3) Admin ──
-    final isPostOwner = (currentUser != null && currentUser.name.toLowerCase() == widget.post.username.toLowerCase()) ||
+    final isPostOwner = (currentUser != null &&
+            currentUser.name.toLowerCase() ==
+                widget.post.username.toLowerCase()) ||
         widget.post.username.toLowerCase() == 'alexj';
     final isCommentAuthor = comment.isSelf ||
-        (currentUser != null && comment.username.toLowerCase() == currentUsername);
+        (currentUser != null &&
+            comment.username.toLowerCase() == currentUsername);
     final isAdmin = currentUser != null &&
-        (currentUser.email.toLowerCase().contains('admin') || currentUsername.contains('admin'));
+        (currentUser.email.toLowerCase().contains('admin') ||
+            currentUsername.contains('admin'));
 
     final canDelete = isPostOwner || isCommentAuthor || isAdmin;
 
@@ -968,15 +1061,20 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                       // Snippet Header Pill
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Colors.white.withOpacity(0.22)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.22)),
                         ),
                         child: Row(
                           children: [
-                            CircleAvatar(radius: 13, backgroundImage: NetworkImage(comment.avatarUrl)),
+                            CircleAvatar(
+                                radius: 13,
+                                backgroundImage:
+                                    NetworkImage(comment.avatarUrl)),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
@@ -1037,7 +1135,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                       if (canDelete) ...[
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Divider(color: Colors.white.withOpacity(0.12), height: 1),
+                          child: Divider(
+                              color: Colors.white.withOpacity(0.12), height: 1),
                         ),
                         _buildCommentOptionTile(
                           icon: LucideIcons.trash2,
@@ -1045,7 +1144,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                           color: const Color(0xFFFF5252),
                           onTap: () {
                             Navigator.pop(ctx);
-                            _deleteComment(comment, parentComment: parentComment);
+                            _deleteComment(comment,
+                                parentComment: parentComment);
                           },
                         ),
                       ],
@@ -1118,10 +1218,12 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
     );
   }
 
-  Widget _buildSingleCommentRow(CommentItem comment, {CommentItem? parentComment, bool isReply = false}) {
+  Widget _buildSingleCommentRow(CommentItem comment,
+      {CommentItem? parentComment, bool isReply = false}) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onLongPress: () => _showCommentOptionsMenu(comment, parentComment: parentComment),
+      onLongPress: () =>
+          _showCommentOptionsMenu(comment, parentComment: parentComment),
       child: Padding(
         padding: EdgeInsets.only(bottom: isReply ? 8 : 12),
         child: Row(
@@ -1141,7 +1243,9 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                       Text(
                         comment.username,
                         style: TextStyle(
-                          color: comment.isSelf ? const Color(0xFF54C5F8) : Colors.white,
+                          color: comment.isSelf
+                              ? const Color(0xFF54C5F8)
+                              : Colors.white,
                           fontWeight: FontWeight.bold,
                           fontSize: isReply ? 11.5 : 12.5,
                         ),
@@ -1149,7 +1253,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                       if (comment.isSelf) ...[
                         const SizedBox(width: 4),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
                           decoration: BoxDecoration(
                             color: const Color(0xFF54C5F8).withOpacity(0.2),
                             borderRadius: BorderRadius.circular(4),
@@ -1230,7 +1335,9 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                 children: [
                   Icon(
                     comment.isLiked ? Icons.favorite : LucideIcons.heart,
-                    color: comment.isLiked ? const Color(0xFFFF2A55) : Colors.white54,
+                    color: comment.isLiked
+                        ? const Color(0xFFFF2A55)
+                        : Colors.white54,
                     size: isReply ? 12 : 14,
                   ),
                   if (comment.likesCount > 0) ...[
@@ -1238,7 +1345,9 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                     Text(
                       '${comment.likesCount}',
                       style: TextStyle(
-                        color: comment.isLiked ? const Color(0xFFFF2A55) : Colors.white54,
+                        color: comment.isLiked
+                            ? const Color(0xFFFF2A55)
+                            : Colors.white54,
                         fontSize: isReply ? 10 : 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1298,12 +1407,14 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
               ? Center(
                   child: Text(
                     'No comments yet. Be the first to share!',
-                    style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.5), fontSize: 13),
                   ),
                 )
               : ListView.builder(
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20.0, vertical: 4.0),
                   itemCount: _comments.length,
                   itemBuilder: (context, index) {
                     final comment = _comments[index];
@@ -1326,7 +1437,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                               });
                             },
                             child: Padding(
-                              padding: const EdgeInsets.only(left: 42, bottom: 8),
+                              padding:
+                                  const EdgeInsets.only(left: 42, bottom: 8),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -1348,7 +1460,9 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                                   ),
                                   const SizedBox(width: 4),
                                   Icon(
-                                    isExpanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                                    isExpanded
+                                        ? LucideIcons.chevronUp
+                                        : LucideIcons.chevronDown,
                                     size: 12,
                                     color: Colors.white60,
                                   ),
@@ -1358,7 +1472,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                           ),
                           if (isExpanded)
                             Padding(
-                              padding: const EdgeInsets.only(left: 36, bottom: 6),
+                              padding:
+                                  const EdgeInsets.only(left: 36, bottom: 6),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: comment.replies.map((reply) {
@@ -1389,7 +1504,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
             ),
             child: Row(
               children: [
-                const Icon(LucideIcons.reply, size: 12, color: Color(0xFF54C5F8)),
+                const Icon(LucideIcons.reply,
+                    size: 12, color: Color(0xFF54C5F8)),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -1406,7 +1522,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                     _replyingToUsername = null;
                     _replyingToComment = null;
                   }),
-                  child: const Icon(LucideIcons.x, size: 14, color: Colors.white70),
+                  child: const Icon(LucideIcons.x,
+                      size: 14, color: Colors.white70),
                 ),
               ],
             ),
@@ -1420,7 +1537,12 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
               CircleAvatar(
                 radius: 14,
                 backgroundImage: NetworkImage(
-                  context.watch<AuthProvider>().currentUser?.avatarUrl.isNotEmpty == true
+                  context
+                              .watch<AuthProvider>()
+                              .currentUser
+                              ?.avatarUrl
+                              .isNotEmpty ==
+                          true
                       ? context.watch<AuthProvider>().currentUser!.avatarUrl
                       : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&q=80',
                 ),
@@ -1428,7 +1550,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
               const SizedBox(width: 10),
               Expanded(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(20),
@@ -1443,7 +1566,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                       hintText: _replyingToUsername != null
                           ? 'Reply to @$_replyingToUsername...'
                           : 'Add a comment...',
-                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 13),
+                      hintStyle: TextStyle(
+                          color: Colors.white.withOpacity(0.45), fontSize: 13),
                       filled: false,
                       fillColor: Colors.transparent,
                       border: InputBorder.none,
@@ -1465,7 +1589,8 @@ class _InteractiveBottomCardsState extends State<InteractiveBottomCards> {
                     color: Color(0xFF54C5F8),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(LucideIcons.send, size: 14, color: Colors.black),
+                  child: const Icon(LucideIcons.send,
+                      size: 14, color: Colors.black),
                 ),
               ),
             ],

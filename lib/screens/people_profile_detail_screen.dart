@@ -18,6 +18,8 @@ const _glass = Color(0x14FFFFFF);
 const _border = Color(0x26FFFFFF);
 const _cyan = Color(0xFF54C5F8);
 
+enum _ConnectionTab { snapped, snapping, mutual }
+
 class PeopleProfileDetailScreen extends StatefulWidget {
   final String userId;
 
@@ -37,6 +39,10 @@ class _PeopleProfileDetailScreenState extends State<PeopleProfileDetailScreen> {
   String? _error;
   VoidCallback? _stopRealtime;
   Timer? _realtimeRefreshTimer;
+  Set<String> _snappedIds = const {};
+  Set<String> _snappingIds = const {};
+
+  Set<String> get _mutualIds => _snappedIds.intersection(_snappingIds);
 
   bool get _isSelf => widget.userId == SupabaseService.currentUserId;
 
@@ -69,8 +75,11 @@ class _PeopleProfileDetailScreenState extends State<PeopleProfileDetailScreen> {
       final profileFuture =
           SupabaseDataService.fetchDeveloperById(widget.userId);
       final postsFuture = SupabaseDataService.fetchUserPosts(widget.userId);
+      final connectionsFuture =
+          SupabaseDataService.fetchDeveloperConnectionIds(widget.userId);
       final row = await profileFuture;
       final posts = await postsFuture;
+      final connections = await connectionsFuture;
       if (row == null) throw StateError('This account is no longer available.');
       final profile = UserProfile.fromPeopleDirectory(row);
       final feedPosts = posts.map((post) {
@@ -107,6 +116,8 @@ class _PeopleProfileDetailScreenState extends State<PeopleProfileDetailScreen> {
       setState(() {
         _profile = profile;
         _posts = feedPosts;
+        _snappedIds = connections.snapped;
+        _snappingIds = connections.snapping;
         _loading = false;
       });
     } catch (error) {
@@ -190,85 +201,172 @@ class _PeopleProfileDetailScreenState extends State<PeopleProfileDetailScreen> {
     ));
   }
 
-  Future<void> _showConnections({required bool snapped}) async {
+  Future<void> _showConnections(_ConnectionTab initialTab) async {
     final profile = _profile;
     if (profile == null) return;
     try {
       final ids =
           await SupabaseDataService.fetchDeveloperConnectionIds(profile.id);
-      final rows = await SupabaseDataService.fetchDevelopers(limit: 200);
-      final wanted = snapped ? ids.snapped : ids.snapping;
-      final people = rows
-          .map(UserProfile.fromPeopleDirectory)
-          .where((item) => wanted.contains(item.id))
-          .toList(growable: false);
+      final rows = await SupabaseDataService.fetchDevelopersByIds(
+        ids.snapped.union(ids.snapping),
+      );
+      final people = rows.map(UserProfile.fromPeopleDirectory).toList();
       if (!mounted) return;
+      setState(() {
+        _snappedIds = ids.snapped;
+        _snappingIds = ids.snapping;
+      });
       await showModalBottomSheet<void>(
         context: context,
-        backgroundColor: _card,
-        showDragHandle: true,
-        builder: (sheetContext) => SafeArea(
-          child: SizedBox(
-            height: 470,
-            child: Column(children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
-                child: Row(children: [
-                  Expanded(
-                    child: Text(snapped ? 'Snapped' : 'Snapping',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700)),
-                  ),
-                  Text('${people.length}',
-                      style: const TextStyle(color: _cyan)),
-                ]),
-              ),
-              Expanded(
-                child: people.isEmpty
-                    ? Center(
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (sheetContext) {
+          var selected = initialTab;
+          var query = '';
+          return StatefulBuilder(builder: (context, updateSheet) {
+            final selectedIds = switch (selected) {
+              _ConnectionTab.snapped => ids.snapped,
+              _ConnectionTab.snapping => ids.snapping,
+              _ConnectionTab.mutual => ids.snapped.intersection(ids.snapping),
+            };
+            final normalized = query.trim().toLowerCase();
+            final visible = people.where((item) {
+              if (!selectedIds.contains(item.id)) return false;
+              return normalized.isEmpty ||
+                  item.name.toLowerCase().contains(normalized) ||
+                  item.handle.toLowerCase().contains(normalized) ||
+                  item.headline.toLowerCase().contains(normalized);
+            }).toList(growable: false);
+            return SafeArea(
+              child: Container(
+                height: MediaQuery.sizeOf(context).height * .78,
+                margin: const EdgeInsets.fromLTRB(12, 48, 12, 8),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xF2181B22),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: _cyan.withOpacity(.42)),
+                  boxShadow: [
+                    BoxShadow(color: _cyan.withOpacity(.12), blurRadius: 28),
+                  ],
+                ),
+                child: Column(children: [
+                  Row(children: [
+                    const Expanded(
+                      child: Text('Connections',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800)),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      icon: const Icon(LucideIcons.x, color: Colors.white70),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: _ConnectionTab.values.map((tab) {
+                      final count = switch (tab) {
+                        _ConnectionTab.snapped => ids.snapped.length,
+                        _ConnectionTab.snapping => ids.snapping.length,
+                        _ConnectionTab.mutual =>
+                          ids.snapped.intersection(ids.snapping).length,
+                      };
+                      final label = switch (tab) {
+                        _ConnectionTab.snapped => 'Snapped',
+                        _ConnectionTab.snapping => 'Snapping',
+                        _ConnectionTab.mutual => 'Mutual',
+                      };
+                      return Expanded(
                         child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            snapped
-                                ? 'No one has snapped this account yet.'
-                                : 'This account is not snapping anyone yet.',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(color: Color(0xFF888899)),
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: ChoiceChip(
+                            selected: selected == tab,
+                            showCheckmark: false,
+                            onSelected: (_) =>
+                                updateSheet(() => selected = tab),
+                            label: Text('$label $count'),
+                            labelStyle: TextStyle(
+                              color: selected == tab
+                                  ? Colors.black
+                                  : Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            selectedColor: _cyan,
+                            backgroundColor: _glass,
+                            side: const BorderSide(color: _border),
                           ),
                         ),
-                      )
-                    : ListView.separated(
-                        itemCount: people.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1, color: _border),
-                        itemBuilder: (_, index) {
-                          final item = people[index];
-                          return ListTile(
-                            leading: _Avatar(profile: item, radius: 20),
-                            title: Text(item.name,
-                                style: const TextStyle(color: Colors.white)),
-                            subtitle: Text(item.handle,
-                                style:
-                                    const TextStyle(color: Color(0xFF888899))),
-                            trailing: const Icon(Icons.chevron_right,
-                                color: Colors.white38),
-                            onTap: () {
-                              Navigator.of(sheetContext).pop();
-                              Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => PeopleProfileDetailScreen(
-                                  userId: item.id,
-                                ),
-                              ));
-                            },
-                          );
-                        },
+                      );
+                    }).toList(growable: false),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    onChanged: (value) => updateSheet(() => query = value),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Search accounts',
+                      hintStyle: const TextStyle(color: Colors.white38),
+                      prefixIcon: const Icon(LucideIcons.search, color: _cyan),
+                      filled: true,
+                      fillColor: _glass,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: const BorderSide(color: _border),
                       ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: visible.isEmpty
+                        ? const Center(
+                            child: Text('No matching accounts',
+                                style: TextStyle(color: Color(0xFF888899))))
+                        : ListView.separated(
+                            itemCount: visible.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1, color: _border),
+                            itemBuilder: (_, index) {
+                              final item = visible[index];
+                              final mutual = ids.snapped.contains(item.id) &&
+                                  ids.snapping.contains(item.id);
+                              return ListTile(
+                                contentPadding:
+                                    const EdgeInsets.symmetric(horizontal: 2),
+                                leading: _Avatar(profile: item, radius: 22),
+                                title: Text(item.name,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700)),
+                                subtitle: Text(item.handle,
+                                    style: const TextStyle(
+                                        color: Color(0xFF9B9BA8))),
+                                trailing: Text(
+                                    mutual
+                                        ? 'Mutual'
+                                        : (ids.snapping.contains(item.id)
+                                            ? 'Snapping'
+                                            : 'Snapped'),
+                                    style: const TextStyle(
+                                        color: _cyan, fontSize: 12)),
+                                onTap: () {
+                                  Navigator.pop(sheetContext);
+                                  Navigator.of(context).push(MaterialPageRoute(
+                                    builder: (_) => PeopleProfileDetailScreen(
+                                        userId: item.id),
+                                  ));
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ]),
               ),
-            ]),
-          ),
-        ),
+            );
+          });
+        },
       );
     } catch (error) {
       if (!mounted) return;
@@ -333,19 +431,6 @@ class _PeopleProfileDetailScreenState extends State<PeopleProfileDetailScreen> {
     return LayoutBuilder(builder: (context, constraints) {
       final wide = constraints.maxWidth >= 720;
       final photo = _ProfileImage(profile: profile, wide: wide);
-      final counts = <Widget>[
-        _InlineCount(value: profile.postsCount, label: 'posts'),
-        _InlineCount(
-          value: profile.followersCount,
-          label: 'snapped',
-          onTap: () => _showConnections(snapped: true),
-        ),
-        _InlineCount(
-          value: profile.followingCount,
-          label: 'snapping',
-          onTap: () => _showConnections(snapped: false),
-        ),
-      ];
       final info = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -370,19 +455,6 @@ class _PeopleProfileDetailScreenState extends State<PeopleProfileDetailScreen> {
                 style: const TextStyle(
                     color: Color(0xFFD4D4DA), fontWeight: FontWeight.w600)),
           ],
-          const SizedBox(height: 14),
-          if (wide)
-            Row(
-              children: [
-                counts[0],
-                const SizedBox(width: 22),
-                counts[1],
-                const SizedBox(width: 22),
-                counts[2],
-              ],
-            )
-          else
-            Wrap(spacing: 12, runSpacing: 2, children: counts),
           if (details.isNotEmpty) ...[
             const SizedBox(height: 16),
             for (final detail in details)
@@ -460,6 +532,49 @@ class _PeopleProfileDetailScreenState extends State<PeopleProfileDetailScreen> {
               ],
             ),
           const SizedBox(height: 22),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 13),
+            decoration: BoxDecoration(
+              color: _glass,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Row(children: [
+              Expanded(
+                  child: _ProfileCount(value: _posts.length, label: 'Posts')),
+              const _CountDivider(),
+              Expanded(
+                  child: _ProfileCount(
+                      value: _snappedIds.length, label: 'Snapped')),
+              const _CountDivider(),
+              Expanded(
+                  child: _ProfileCount(
+                      value: _snappingIds.length, label: 'Snapping')),
+              const _CountDivider(),
+              Expanded(
+                  child:
+                      _ProfileCount(value: _mutualIds.length, label: 'Mutual')),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(
+                child: OutlinedButton(
+                    onPressed: () => _showConnections(_ConnectionTab.snapped),
+                    child: const Text('Snapped'))),
+            const SizedBox(width: 8),
+            Expanded(
+                child: OutlinedButton(
+                    onPressed: () => _showConnections(_ConnectionTab.snapping),
+                    child: const Text('Snapping'))),
+            const SizedBox(width: 8),
+            Expanded(
+                child: OutlinedButton(
+                    onPressed: () => _showConnections(_ConnectionTab.mutual),
+                    child: const Text('Mutual'))),
+          ]),
+          const SizedBox(height: 14),
           if (_isSelf)
             Container(
               width: double.infinity,
@@ -700,36 +815,36 @@ class _ProfileImage extends StatelessWidget {
   }
 }
 
-class _InlineCount extends StatelessWidget {
+class _ProfileCount extends StatelessWidget {
   final int value;
   final String label;
-  final VoidCallback? onTap;
 
-  const _InlineCount({required this.value, required this.label, this.onTap});
+  const _ProfileCount({required this.value, required this.label});
 
   @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: RichText(
-            text: TextSpan(
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              children: [
-                TextSpan(
-                  text: '$value ',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                TextSpan(
-                  text: label,
-                  style: const TextStyle(color: Color(0xFFB0B0BA)),
-                ),
-              ],
-            ),
-          ),
-        ),
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('$value',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800)),
+          const SizedBox(height: 2),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFF9B9BA8), fontSize: 11)),
+        ]),
       );
+}
+
+class _CountDivider extends StatelessWidget {
+  const _CountDivider();
+
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 1, height: 32, color: _border);
 }
 
 class _Avatar extends StatelessWidget {

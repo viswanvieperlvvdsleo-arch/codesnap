@@ -32,6 +32,7 @@ class DocItem {
   final String size;
   final String date;
   final Color badgeColor;
+  final String? url;
 
   const DocItem({
     required this.id,
@@ -40,6 +41,7 @@ class DocItem {
     required this.size,
     required this.date,
     required this.badgeColor,
+    this.url,
   });
 }
 
@@ -81,151 +83,6 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  static const List<MediaItem> _defaultMediaItems = [
-    MediaItem(
-      id: 'm1',
-      title: 'Chat Attachment: Terminal Run Screenshot',
-      url: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=600&auto=format&fit=crop&q=80',
-      isVideo: true,
-      videoDuration: '0:06',
-      dateGroup: 'THIS MONTH',
-      subtitle: 'Sent in chat • Sep 26',
-    ),
-    MediaItem(
-      id: 'm2',
-      title: 'Chat Attachment: Glass Theme Mockup',
-      url: 'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?w=600&auto=format&fit=crop&q=80',
-      isVideo: false,
-      dateGroup: 'THIS MONTH',
-      subtitle: 'Sent in chat • Sep 24',
-    ),
-    MediaItem(
-      id: 'm3',
-      title: 'Chat Screen Recording: Zero-Cost Terminal',
-      url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
-      isVideo: true,
-      videoDuration: '9:02',
-      dateGroup: 'THIS MONTH',
-      subtitle: 'Sent in chat • Sep 20',
-    ),
-    MediaItem(
-      id: 'm4',
-      title: 'Chat Attachment: Architecture Whiteboard',
-      url: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=600&auto=format&fit=crop&q=80',
-      isVideo: false,
-      dateGroup: 'THIS MONTH',
-      subtitle: 'Sent in chat • Sep 18',
-    ),
-    MediaItem(
-      id: 'm5',
-      title: 'Chat Attachment: Code Review Clip',
-      url: 'https://images.unsplash.com/photo-1534972195531-a756b1126f24?w=600&auto=format&fit=crop&q=80',
-      isVideo: true,
-      videoDuration: '1:45',
-      dateGroup: 'THIS MONTH',
-      subtitle: 'Sent in chat • Sep 15',
-    ),
-    MediaItem(
-      id: 'm6',
-      title: 'Chat Attachment: Custom Typography Preview',
-      url: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&auto=format&fit=crop&q=80',
-      isVideo: false,
-      dateGroup: 'THIS MONTH',
-      subtitle: 'Sent in chat • Sep 10',
-    ),
-    MediaItem(
-      id: 'm7',
-      title: 'Cloud Workspace Socket Sync',
-      url: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop&q=80',
-      isVideo: true,
-      videoDuration: '3:18',
-      dateGroup: 'AUGUST',
-      subtitle: 'Websocket handshake protocol test',
-    ),
-    MediaItem(
-      id: 'm8',
-      title: 'File Explorer Tree View',
-      url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80',
-      isVideo: false,
-      dateGroup: 'AUGUST',
-      subtitle: 'Virtual tree virtualized scroll test',
-    ),
-  ];
-
-  static const List<DocItem> _defaultDocItems = [
-    DocItem(
-      id: 'd1',
-      name: 'cloudsnap_kernel_runner.dart',
-      extension: 'DART',
-      size: '28.4 KB',
-      date: 'Sep 26, 2026',
-      badgeColor: Color(0xFF54C5F8),
-    ),
-    DocItem(
-      id: 'd2',
-      name: 'arena_voting_smart_contract.sol',
-      extension: 'SOL',
-      size: '14.2 KB',
-      date: 'Sep 24, 2026',
-      badgeColor: Color(0xFFB388FF),
-    ),
-    DocItem(
-      id: 'd3',
-      name: 'mobile_ide_specifications_v4.pdf',
-      extension: 'PDF',
-      size: '3.8 MB',
-      date: 'Sep 20, 2026',
-      badgeColor: Color(0xFFFF5252),
-    ),
-    DocItem(
-      id: 'd4',
-      name: 'terminal_ansi_colors_theme.json',
-      extension: 'JSON',
-      size: '6.1 KB',
-      date: 'Sep 18, 2026',
-      badgeColor: Color(0xFFFFD700),
-    ),
-    DocItem(
-      id: 'd5',
-      name: 'docker-compose.sandbox.yml',
-      extension: 'YML',
-      size: '4.7 KB',
-      date: 'Aug 30, 2026',
-      badgeColor: Color(0xFF69F0AE),
-    ),
-  ];
-
-  static const List<LinkItem> _defaultLinkItems = [
-    LinkItem(
-      id: 'l1',
-      title: 'codesnap / core-engine',
-      url: 'https://github.com/codesnap/core-engine',
-      description: 'Distributed workspace runner and terminal protocol engine.',
-      icon: LucideIcons.code2,
-    ),
-    LinkItem(
-      id: 'l2',
-      title: 'Flutter Desktop & Mobile Embedder',
-      url: 'https://docs.flutter.dev/platform-integration',
-      description: 'Native C++ bridge for low-latency shell rendering.',
-      icon: LucideIcons.globe,
-    ),
-    LinkItem(
-      id: 'l3',
-      title: 'CodeSnap Arena Hackathon Rulebook',
-      url: 'https://codesnap.dev/arena/rules-2026',
-      description: 'Terms of participation, submission requirements and judging rubrics.',
-      icon: LucideIcons.trophy,
-    ),
-    LinkItem(
-      id: 'l4',
-      title: 'Bug AI Model Context Protocol Specs',
-      url: 'https://spec.modelcontextprotocol.io',
-      description: 'Standard protocol for external AI agent tools.',
-      icon: LucideIcons.bot,
-    ),
-  ];
-
   late List<MediaItem> _mediaItems;
   late List<DocItem> _docItems;
   late List<LinkItem> _linkItems;
@@ -234,18 +91,13 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _mediaItems = widget.customMediaItems != null && widget.customMediaItems!.isNotEmpty
-        ? widget.customMediaItems!
-        : _defaultMediaItems;
-    _docItems = widget.customDocItems != null && widget.customDocItems!.isNotEmpty
-        ? widget.customDocItems!
-        : _defaultDocItems;
-    _linkItems = widget.customLinkItems != null && widget.customLinkItems!.isNotEmpty
-        ? widget.customLinkItems!
-        : _defaultLinkItems;
+    _mediaItems = widget.customMediaItems ?? const [];
+    _docItems = widget.customDocItems ?? const [];
+    _linkItems = widget.customLinkItems ?? const [];
   }
 
-  Widget _buildSafeImage(String url, {BoxFit fit = BoxFit.cover, double? width, double? height}) {
+  Widget _buildSafeImage(String url,
+      {BoxFit fit = BoxFit.cover, double? width, double? height}) {
     if (url.startsWith('data:image')) {
       try {
         final bytes = base64Decode(url.split(',').last);
@@ -282,13 +134,15 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
           filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
           child: Dialog(
             backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
             child: Container(
               constraints: const BoxConstraints(maxWidth: 550, maxHeight: 650),
               decoration: BoxDecoration(
                 color: const Color(0xFF0C0D14).withOpacity(0.92),
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.2),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.18), width: 1.2),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.6),
@@ -340,7 +194,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                                 shape: BoxShape.circle,
                                 color: Colors.white.withOpacity(0.1),
                               ),
-                              child: const Icon(LucideIcons.x, size: 18, color: Colors.white),
+                              child: const Icon(LucideIcons.x,
+                                  size: 18, color: Colors.white),
                             ),
                           ),
                         ],
@@ -351,20 +206,33 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          _buildSafeImage(
-                            item.url,
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                          ),
+                          if (item.isVideo)
+                            Container(
+                              width: double.infinity,
+                              height: 320,
+                              color: const Color(0xFF151923),
+                              alignment: Alignment.center,
+                              child: const Icon(LucideIcons.video,
+                                  size: 72, color: Color(0xFF54C5F8)),
+                            )
+                          else
+                            _buildSafeImage(
+                              item.url,
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                            ),
                           if (item.isVideo)
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: Colors.black.withOpacity(0.65),
-                                border: Border.all(color: Colors.white.withOpacity(0.4), width: 1.5),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.4),
+                                    width: 1.5),
                               ),
-                              child: const Icon(LucideIcons.play, size: 36, color: Colors.white),
+                              child: const Icon(LucideIcons.play,
+                                  size: 36, color: Colors.white),
                             ),
                         ],
                       ),
@@ -376,21 +244,19 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           _buildModalAction(LucideIcons.share2, 'Share', () {
+                            Clipboard.setData(ClipboardData(text: item.url));
                             Navigator.pop(context);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Media link ready to share')),
+                              const SnackBar(
+                                  content: Text('Media link copied')),
                             );
                           }),
-                          _buildModalAction(LucideIcons.download, 'Save', () {
+                          _buildModalAction(LucideIcons.copy, 'Copy link', () {
+                            Clipboard.setData(ClipboardData(text: item.url));
                             Navigator.pop(context);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Saved to device gallery')),
-                            );
-                          }),
-                          _buildModalAction(LucideIcons.code, 'Use in IDE', () {
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Inserted asset into Workspace assets/')),
+                              const SnackBar(
+                                  content: Text('Media link copied')),
                             );
                           }),
                         ],
@@ -420,7 +286,11 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
           children: [
             Icon(icon, size: 16, color: Colors.white),
             const SizedBox(width: 8),
-            Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600)),
           ],
         ),
       ),
@@ -440,7 +310,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
               decoration: BoxDecoration(
                 color: const Color(0xFF0C0D14).withOpacity(0.85),
                 border: Border(
-                  bottom: BorderSide(color: Colors.white.withOpacity(0.1), width: 1),
+                  bottom: BorderSide(
+                      color: Colors.white.withOpacity(0.1), width: 1),
                 ),
               ),
               child: SafeArea(
@@ -449,7 +320,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                   children: [
                     // Top Bar
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       child: Row(
                         children: [
                           SpringButton(
@@ -460,7 +332,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                                 shape: BoxShape.circle,
                                 color: Colors.white.withOpacity(0.06),
                               ),
-                              child: const Icon(LucideIcons.chevronLeft, size: 22, color: Colors.white),
+                              child: const Icon(LucideIcons.chevronLeft,
+                                  size: 22, color: Colors.white),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -489,7 +362,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                           SpringButton(
                             onTap: () {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Search filter active')),
+                                const SnackBar(
+                                    content: Text('Search filter active')),
                               );
                             },
                             child: Container(
@@ -498,7 +372,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                                 shape: BoxShape.circle,
                                 color: Colors.white.withOpacity(0.06),
                               ),
-                              child: const Icon(LucideIcons.search, size: 20, color: Colors.white),
+                              child: const Icon(LucideIcons.search,
+                                  size: 20, color: Colors.white),
                             ),
                           ),
                         ],
@@ -511,7 +386,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                       indicatorWeight: 2.5,
                       labelColor: const Color(0xFF54C5F8),
                       unselectedLabelColor: Colors.white.withOpacity(0.6),
-                      labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      labelStyle: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14),
                       tabs: const [
                         Tab(text: 'Media'),
                         Tab(text: 'Docs'),
@@ -538,7 +414,14 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
 
   // 1. Media Tab (Grouped by THIS MONTH, AUGUST, etc. with video timestamp badges)
   Widget _buildMediaTab() {
-    final groups = ['THIS MONTH', 'AUGUST'];
+    if (_mediaItems.isEmpty) {
+      return _buildEmptyState(
+        LucideIcons.images,
+        'No shared media',
+        'Images and videos shared in this chat will appear here.',
+      );
+    }
+    final groups = _mediaItems.map((item) => item.dateGroup).toSet().toList();
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
@@ -583,10 +466,15 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        _buildSafeImage(
-                          item.url,
-                          fit: BoxFit.cover,
-                        ),
+                        if (item.isVideo)
+                          Container(
+                            color: const Color(0xFF151923),
+                            alignment: Alignment.center,
+                            child: const Icon(LucideIcons.video,
+                                size: 34, color: Color(0xFF54C5F8)),
+                          )
+                        else
+                          _buildSafeImage(item.url, fit: BoxFit.cover),
                         // Dark glass gradient overlay for readability
                         Positioned.fill(
                           child: DecoratedBox(
@@ -608,19 +496,22 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                             bottom: 6,
                             left: 6,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
                                 color: Colors.black.withOpacity(0.75),
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.white.withOpacity(0.2)),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.2)),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(LucideIcons.play, size: 10, color: Colors.white),
+                                  const Icon(LucideIcons.play,
+                                      size: 10, color: Colors.white),
                                   const SizedBox(width: 4),
                                   Text(
-                                    item.videoDuration ?? '0:00',
+                                    item.videoDuration ?? 'Video',
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 10,
@@ -646,6 +537,13 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
 
   // 2. Docs Tab (Extension badges, file size, download/inspect actions)
   Widget _buildDocsTab() {
+    if (_docItems.isEmpty) {
+      return _buildEmptyState(
+        LucideIcons.fileText,
+        'No shared documents',
+        'Documents shared in this chat will appear here.',
+      );
+    }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
       itemCount: _docItems.length,
@@ -654,9 +552,12 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
         final doc = _docItems[index];
         return SpringButton(
           onTap: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Opening ${doc.name} in Workspace Editor')),
-            );
+            if (doc.url != null) {
+              Clipboard.setData(ClipboardData(text: doc.url!));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Copied ${doc.name} link')),
+              );
+            }
           },
           child: Container(
             padding: const EdgeInsets.all(12),
@@ -716,7 +617,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                           const SizedBox(width: 8),
                           Text(
                             '•',
-                            style: TextStyle(color: Colors.white.withOpacity(0.4)),
+                            style:
+                                TextStyle(color: Colors.white.withOpacity(0.4)),
                           ),
                           const SizedBox(width: 8),
                           Text(
@@ -732,10 +634,14 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(LucideIcons.download, size: 18, color: Colors.white70),
+                  icon: const Icon(LucideIcons.download,
+                      size: 18, color: Colors.white70),
                   onPressed: () {
+                    if (doc.url == null) return;
+                    Clipboard.setData(ClipboardData(text: doc.url!));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Downloading ${doc.name}...')),
+                      SnackBar(
+                          content: Text('Copied ${doc.name} download link')),
                     );
                   },
                 ),
@@ -749,6 +655,13 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
 
   // 3. Links Tab (Rich link preview cards with copy/open)
   Widget _buildLinksTab() {
+    if (_linkItems.isEmpty) {
+      return _buildEmptyState(
+        LucideIcons.link,
+        'No shared links',
+        'Links sent in this chat will appear here.',
+      );
+    }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
       itemCount: _linkItems.length,
@@ -777,9 +690,11 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                   decoration: BoxDecoration(
                     color: const Color(0xFF54C5F8).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.3)),
+                    border: Border.all(
+                        color: const Color(0xFF54C5F8).withOpacity(0.3)),
                   ),
-                  child: Icon(link.icon, size: 22, color: const Color(0xFF54C5F8)),
+                  child:
+                      Icon(link.icon, size: 22, color: const Color(0xFF54C5F8)),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -817,7 +732,8 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(LucideIcons.copy, size: 16, color: Colors.white70),
+                  icon: const Icon(LucideIcons.copy,
+                      size: 16, color: Colors.white70),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: link.url));
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -830,6 +746,27 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildEmptyState(IconData icon, String title, String subtitle) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 44, color: Colors.white30),
+          const SizedBox(height: 14),
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text(subtitle,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white54, height: 1.4)),
+        ]),
+      ),
     );
   }
 }

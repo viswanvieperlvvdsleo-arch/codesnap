@@ -780,6 +780,34 @@ class SupabaseDataService {
     return data == null ? null : Map<String, dynamic>.from(data);
   }
 
+  /// Fetches exactly the requested public profiles. Chunking keeps the
+  /// PostgREST URL bounded for accounts with a large connection list.
+  static Future<List<Map<String, dynamic>>> fetchDevelopersByIds(
+    Iterable<String> userIds,
+  ) async {
+    final ids = userIds.where(_isUuid).toSet().toList(growable: false);
+    if (ids.isEmpty) return const [];
+
+    final rowsById = <String, Map<String, dynamic>>{};
+    for (var start = 0; start < ids.length; start += 100) {
+      final end = (start + 100).clamp(0, ids.length);
+      final data = await _client
+          .from('people_directory')
+          .select()
+          .inFilter('id', ids.sublist(start, end));
+      for (final raw in data) {
+        final row = Map<String, dynamic>.from(raw);
+        final id = row['id']?.toString();
+        if (id != null && id.isNotEmpty) rowsById[id] = row;
+      }
+    }
+    final rows = rowsById.values.toList(growable: false)
+      ..sort((a, b) => (a['full_name']?.toString() ?? '')
+          .toLowerCase()
+          .compareTo((b['full_name']?.toString() ?? '').toLowerCase()));
+    return rows;
+  }
+
   /// IDs connected to a profile. `snapped` are users snapping this profile;
   /// `snapping` are users this profile currently snaps.
   static Future<({Set<String> snapped, Set<String> snapping})>

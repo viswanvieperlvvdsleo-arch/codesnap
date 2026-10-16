@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/spring_button.dart';
 import 'dart:convert';
 import 'contact_info_screen.dart';
@@ -115,6 +116,43 @@ class ChatWallpaperConfig {
       alignmentY: alignmentY ?? this.alignmentY,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'type': type,
+        if (solidColor != null) 'solidColor': solidColor!.toARGB32(),
+        if (gradientColors != null)
+          'gradientColors':
+              gradientColors!.map((color) => color.toARGB32()).toList(),
+        if (imageUrl != null) 'imageUrl': imageUrl,
+        'blur': blur,
+        'opacity': opacity,
+        'scale': scale,
+        'alignmentX': alignmentX,
+        'alignmentY': alignmentY,
+      };
+
+  factory ChatWallpaperConfig.fromJson(Map<String, dynamic> json) {
+    Color? readColor(Object? value) =>
+        value is num ? Color(value.toInt()) : null;
+    final rawGradient = json['gradientColors'];
+    return ChatWallpaperConfig(
+      id: json['id']?.toString() ?? 'local_wallpaper',
+      name: json['name']?.toString() ?? 'Saved wallpaper',
+      type: json['type']?.toString() ?? 'solid',
+      solidColor: readColor(json['solidColor']),
+      gradientColors: rawGradient is List
+          ? rawGradient.map(readColor).whereType<Color>().toList()
+          : null,
+      imageUrl: json['imageUrl']?.toString(),
+      blur: (json['blur'] as num?)?.toDouble() ?? 0,
+      opacity: (json['opacity'] as num?)?.toDouble() ?? .85,
+      scale: (json['scale'] as num?)?.toDouble() ?? 1,
+      alignmentX: (json['alignmentX'] as num?)?.toDouble() ?? 0,
+      alignmentY: (json['alignmentY'] as num?)?.toDouble() ?? 0,
+    );
+  }
 }
 
 class ChatConversation {
@@ -195,6 +233,91 @@ class ChatStateStore {
   final ValueNotifier<String?> selectedConversationNotifier =
       ValueNotifier<String?>(null);
   final ValueNotifier<int> conversationsUpdateNotifier = ValueNotifier<int>(0);
+  final Map<String, ChatWallpaperConfig> _conversationWallpapers = {};
+  String? _wallpapersLoadedForUser;
+
+  String get _wallpaperStorageKey =>
+      'chat_wallpapers_v1_${SupabaseService.currentUserId ?? 'guest'}';
+
+  Future<void> loadLocalWallpapers() async {
+    final userKey = SupabaseService.currentUserId ?? 'guest';
+    if (_wallpapersLoadedForUser == userKey) return;
+    _wallpapersLoadedForUser = userKey;
+    _conversationWallpapers.clear();
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = prefs.getString(_wallpaperStorageKey);
+    if (encoded == null || encoded.isEmpty) return;
+    try {
+      final raw = jsonDecode(encoded);
+      if (raw is! Map) return;
+      final map = Map<String, dynamic>.from(raw);
+      final defaultRaw = map['default'];
+      final contactsRaw = map['contacts'];
+      if (defaultRaw is Map) {
+        defaultWallpaper = ChatWallpaperConfig.fromJson(
+          Map<String, dynamic>.from(defaultRaw),
+        );
+      }
+      if (contactsRaw is Map) {
+        contactsWallpaper = ChatWallpaperConfig.fromJson(
+          Map<String, dynamic>.from(contactsRaw),
+        );
+      }
+      final conversationsRaw = map['conversations'];
+      if (conversationsRaw is Map) {
+        for (final entry in conversationsRaw.entries) {
+          if (entry.value is Map) {
+            _conversationWallpapers[entry.key.toString()] =
+                ChatWallpaperConfig.fromJson(
+              Map<String, dynamic>.from(entry.value as Map),
+            );
+          }
+        }
+      }
+    } catch (error) {
+      debugPrint('Ignoring invalid local chat wallpaper data: $error');
+    }
+  }
+
+  ChatWallpaperConfig? wallpaperFor(String conversationId) =>
+      _conversationWallpapers[conversationId];
+
+  Future<void> saveConversationWallpaper(
+    String conversationId,
+    ChatWallpaperConfig? wallpaper,
+  ) async {
+    if (wallpaper == null) {
+      _conversationWallpapers.remove(conversationId);
+    } else {
+      _conversationWallpapers[conversationId] = wallpaper;
+    }
+    await _persistWallpapers();
+  }
+
+  Future<void> saveDefaultWallpaper(ChatWallpaperConfig wallpaper) async {
+    defaultWallpaper = wallpaper;
+    await _persistWallpapers();
+  }
+
+  Future<void> saveContactsWallpaper(ChatWallpaperConfig wallpaper) async {
+    contactsWallpaper = wallpaper;
+    await _persistWallpapers();
+  }
+
+  Future<void> _persistWallpapers() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _wallpaperStorageKey,
+      jsonEncode({
+        'default': defaultWallpaper.toJson(),
+        'contacts': contactsWallpaper.toJson(),
+        'conversations': {
+          for (final entry in _conversationWallpapers.entries)
+            entry.key: entry.value.toJson(),
+        },
+      }),
+    );
+  }
 
   void notifyConversationsUpdated() {
     conversationsUpdateNotifier.value++;
@@ -487,7 +610,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (widget.isExpanded != null) {
       _isExpanded = widget.isExpanded!;
     }
-    _loadConversations(showLoading: true);
+    unawaited(_initializeChat());
     _msgCtrl.addListener(() {
       final isNowTyping = _msgCtrl.text.trim().isNotEmpty;
       if (isNowTyping != _isTyping) {
@@ -518,6 +641,12 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       },
     );
+  }
+
+  Future<void> _initializeChat() async {
+    await ChatStateStore.instance.loadLocalWallpapers();
+    if (!mounted) return;
+    await _loadConversations(showLoading: true);
   }
 
   void _onConversationsUpdated() {
@@ -623,7 +752,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   message.senderId != currentUserId && !message.isRead)
               .length,
           messages: messages,
-          customWallpaper: existingWallpapers[record.id],
+          customWallpaper: ChatStateStore.instance.wallpaperFor(record.id) ??
+              existingWallpapers[record.id],
         );
       }).toList(growable: true);
 
@@ -1178,7 +1308,22 @@ class _ChatScreenState extends State<ChatScreen> {
     _forwardMessages([msg]);
   }
 
-  void _deleteSingleMessage(ChatMessage msg, {required bool forEveryone}) {
+  Future<void> _deleteSingleMessage(
+    ChatMessage msg, {
+    required bool forEveryone,
+  }) async {
+    if (forEveryone) {
+      try {
+        await ChatService.deleteMessage(msg.id);
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not delete message: $error')),
+        );
+        return;
+      }
+    }
+    if (!mounted) return;
     setState(() {
       final conv = _activeConversation;
       if (conv != null) conv.messages.remove(msg);
@@ -1373,7 +1518,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 : (msg.mediaType == 'video' ? 'Video Recording' : 'Chat Image'),
             url: msg.mediaUrl!,
             isVideo: msg.mediaType == 'video',
-            videoDuration: msg.mediaType == 'video' ? '0:18' : null,
+            videoDuration: null,
             dateGroup: 'SHARED IN CHAT',
             subtitle: '${msg.isMe ? "Sent by you" : conv.name} • ${msg.time}',
           ),
@@ -1391,8 +1536,9 @@ class _ChatScreenState extends State<ChatScreen> {
             id: msg.id,
             name: docName,
             extension: ext,
-            size: '2.4 MB',
+            size: 'Shared file',
             date: msg.time,
+            url: msg.mediaUrl,
             badgeColor: ext == 'PDF'
                 ? const Color(0xFFFF5252)
                 : (ext == 'JSON'
@@ -1430,9 +1576,9 @@ class _ChatScreenState extends State<ChatScreen> {
       PageRouteBuilder(
         pageBuilder: (context, anim, secAnim) => MediaLinksDocsScreen(
           contactName: conv.name,
-          customMediaItems: sharedMedia.isNotEmpty ? sharedMedia : null,
-          customDocItems: sharedDocs.isNotEmpty ? sharedDocs : null,
-          customLinkItems: sharedLinks.isNotEmpty ? sharedLinks : null,
+          customMediaItems: sharedMedia,
+          customDocItems: sharedDocs,
+          customLinkItems: sharedLinks,
         ),
         transitionsBuilder: (context, anim, secAnim, child) {
           return FadeTransition(
@@ -2292,6 +2438,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       SpringButton(
                         onTap: () {
                           setState(() => conv.customWallpaper = null);
+                          unawaited(ChatStateStore.instance
+                              .saveConversationWallpaper(conv.id, null));
                           Navigator.pop(pickerCtx);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
@@ -2602,6 +2750,17 @@ class _ChatScreenState extends State<ChatScreen> {
                 conv.customWallpaper = appliedConfig;
               }
             });
+            if (forAllChats) {
+              unawaited(
+                  ChatStateStore.instance.saveDefaultWallpaper(appliedConfig));
+              for (final item in _conversations) {
+                unawaited(ChatStateStore.instance
+                    .saveConversationWallpaper(item.id, appliedConfig));
+              }
+            } else {
+              unawaited(ChatStateStore.instance
+                  .saveConversationWallpaper(conv.id, appliedConfig));
+            }
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
@@ -2873,7 +3032,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     isPrimary: true,
                     onTap: () {
                       Navigator.pop(ctx);
-                      _deleteSingleMessage(msg, forEveryone: true);
+                      unawaited(_deleteSingleMessage(msg, forEveryone: true));
                     },
                   ),
                   const SizedBox(height: 10),
@@ -2889,7 +3048,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   isPrimary: !canDeleteForEveryone,
                   onTap: () {
                     Navigator.pop(ctx);
-                    _deleteSingleMessage(msg, forEveryone: false);
+                    unawaited(_deleteSingleMessage(msg, forEveryone: false));
                   },
                 ),
                 const SizedBox(height: 10),
@@ -3012,6 +3171,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     onBack: () => _selectConversation(null),
                     onWallpaperUpdated: (newWp) {
                       setState(() => activeConv.customWallpaper = newWp);
+                      unawaited(ChatStateStore.instance
+                          .saveConversationWallpaper(activeConv.id, newWp));
                     },
                   )
                 : _buildEmptyChatPlaceholder(),
@@ -3043,6 +3204,8 @@ class _ChatScreenState extends State<ChatScreen> {
           onBack: () => _selectConversation(null),
           onWallpaperUpdated: (newWp) {
             setState(() => conv.customWallpaper = newWp);
+            unawaited(ChatStateStore.instance
+                .saveConversationWallpaper(conv.id, newWp));
           },
         ),
       );
@@ -3742,6 +3905,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       solidColor: Color(0xFF07080A),
                     );
                   });
+                  unawaited(ChatStateStore.instance
+                      .saveContactsWallpaper(_contactsWallpaper));
                   Navigator.pop(pickerCtx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -3970,6 +4135,8 @@ class _ChatScreenState extends State<ChatScreen> {
             setState(() {
               _contactsWallpaper = appliedConfig;
             });
+            unawaited(
+                ChatStateStore.instance.saveContactsWallpaper(appliedConfig));
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Contacts wallpaper updated!')),
             );

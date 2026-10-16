@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -2031,8 +2032,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 ),
                 Text(
                   msg.mediaType == 'video'
-                      ? '0:24 • MP4'
-                      : 'PDF Document • 2.4 MB',
+                      ? 'Video shared in chat'
+                      : 'Document shared in chat',
                   style: TextStyle(
                       color: Colors.white.withOpacity(0.6), fontSize: 10.5),
                 ),
@@ -2997,6 +2998,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                   onTap: () {
                     setState(() => conv.customWallpaper = null);
                     widget.onWallpaperUpdated?.call(null);
+                    unawaited(ChatStateStore.instance
+                        .saveConversationWallpaper(conv.id, null));
                     Navigator.pop(pickerCtx);
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -3229,6 +3232,22 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               widget.conversation.customWallpaper = appliedConfig;
             });
             widget.onWallpaperUpdated?.call(appliedConfig);
+            if (forAllChats) {
+              unawaited(
+                  ChatStateStore.instance.saveDefaultWallpaper(appliedConfig));
+              for (final conversation in widget.allConversations) {
+                conversation.customWallpaper = appliedConfig;
+                unawaited(ChatStateStore.instance.saveConversationWallpaper(
+                  conversation.id,
+                  appliedConfig,
+                ));
+              }
+            } else {
+              unawaited(ChatStateStore.instance.saveConversationWallpaper(
+                widget.conversation.id,
+                appliedConfig,
+              ));
+            }
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
@@ -3480,13 +3499,27 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     icon: LucideIcons.trash2,
                     color: const Color(0xFFFF5252),
                     isPrimary: true,
-                    onTap: () {
+                    onTap: () async {
                       Navigator.pop(ctx);
-                      setState(() => widget.conversation.messages.remove(msg));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Message deleted for everyone')),
-                      );
+                      try {
+                        await ChatService.deleteMessage(msg.id);
+                        if (!mounted) return;
+                        setState(() => widget.conversation.messages.removeWhere(
+                              (message) => message.id == msg.id,
+                            ));
+                        ChatStateStore.instance.notifyConversationsUpdated();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Message deleted for everyone')),
+                        );
+                      } catch (error) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content:
+                                  Text('Could not delete message: $error')),
+                        );
+                      }
                     },
                   ),
                   const SizedBox(height: 10),

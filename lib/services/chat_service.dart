@@ -329,10 +329,18 @@ class ChatService {
   }
 
   static Future<void> deleteMessage(String messageId) async {
-    await _client
+    final userId = SupabaseService.currentUserId;
+    if (userId == null) throw const AuthException('Authentication required');
+    final deleted = await _client
         .from(SupabaseService.tableMessages)
-        .update({'deleted_at': DateTime.now().toUtc().toIso8601String()}).eq(
-            'id', messageId);
+        .update({'deleted_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', messageId)
+        .eq('sender_id', userId)
+        .select('id')
+        .maybeSingle();
+    if (deleted == null) {
+      throw StateError('Only the sender can delete this message for everyone.');
+    }
   }
 
   static Future<String> startCall({
