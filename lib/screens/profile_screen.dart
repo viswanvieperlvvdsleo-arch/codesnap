@@ -840,7 +840,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Text(
                     paymentService.history.isNotEmpty
                         ? paymentService.history.first.itemTitle
-                        : 'Flutter & Dart: Production Architecture',
+                        : 'No completed purchases',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
@@ -849,8 +849,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               Text(
                 paymentService.history.isNotEmpty
-                    ? '\$${paymentService.history.first.amount.toStringAsFixed(2)}'
-                    : '\$4.99',
+                    ? '${paymentService.history.first.currency == 'INR' ? '₹' : '${paymentService.history.first.currency} '}${paymentService.history.first.amount.toStringAsFixed(2)}'
+                    : '—',
                 style: const TextStyle(color: _kAccentCyan, fontSize: 12, fontWeight: FontWeight.bold),
               ),
             ],
@@ -965,7 +965,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       ),
                                     ),
                                     Text(
-                                      '\$${item.amount.toStringAsFixed(2)}',
+                                      '${item.currency == 'INR' ? '₹' : '${item.currency} '}${item.amount.toStringAsFixed(2)}',
                                       style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 14, fontWeight: FontWeight.bold),
                                     ),
                                   ],

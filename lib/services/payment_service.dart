@@ -1,4 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'browser_launcher.dart';
+import 'supabase_service.dart';
 
 class PaymentRecord {
   final String id;
@@ -7,7 +13,7 @@ class PaymentRecord {
   final double amount;
   final String currency;
   final String timestamp;
-  final String status; // 'Success', 'Pending', 'Failed'
+  final String status;
   final String paymentMethod;
   final String receiptId;
 
@@ -16,7 +22,7 @@ class PaymentRecord {
     required this.itemTitle,
     required this.itemId,
     required this.amount,
-    this.currency = 'USD',
+    this.currency = 'INR',
     required this.timestamp,
     this.status = 'Success',
     required this.paymentMethod,
@@ -24,73 +30,134 @@ class PaymentRecord {
   });
 }
 
+class CheckoutResult {
+  final bool alreadyPurchased;
+  final bool checkoutOpened;
+
+  const CheckoutResult({
+    required this.alreadyPurchased,
+    required this.checkoutOpened,
+  });
+}
+
 class PaymentService {
-  PaymentService._();
+  PaymentService._() {
+    unawaited(refreshPurchases());
+  }
+
   static final PaymentService instance = PaymentService._();
 
   final ValueNotifier<int> changeNotifier = ValueNotifier<int>(0);
+  final Set<String> _unlockedItemIds = {};
+  final List<PaymentRecord> _history = [];
 
-  final Set<String> _unlockedItemIds = {'book-1', 'book-3'}; // default unlocked demo items
-
-  final List<PaymentRecord> _history = [
-    const PaymentRecord(
-      id: 'tx_10482',
-      itemTitle: 'Flutter & Dart: Production Architecture (PDF)',
-      itemId: 'book-1',
-      amount: 4.99,
-      timestamp: 'Today, 2:15 PM',
-      status: 'Success',
-      paymentMethod: 'Apple Pay •••• 4242',
-      receiptId: 'REC-CS-99182',
-    ),
-    const PaymentRecord(
-      id: 'tx_10481',
-      itemTitle: 'Distributed Systems & Microservices (Full Guide)',
-      itemId: 'book-3',
-      amount: 6.50,
-      timestamp: 'Yesterday, 6:40 PM',
-      status: 'Success',
-      paymentMethod: 'Credit Card •••• 8831',
-      receiptId: 'REC-CS-99140',
-    ),
-    const PaymentRecord(
-      id: 'tx_10479',
-      itemTitle: 'CodeSnap Pro Monthly Developer License',
-      itemId: 'sub-pro-1',
-      amount: 9.99,
-      timestamp: 'Sep 24, 2026',
-      status: 'Success',
-      paymentMethod: 'Google Pay •••• 1092',
-      receiptId: 'REC-CS-98421',
-    ),
-  ];
+  SupabaseClient get _client => SupabaseService.client;
 
   List<PaymentRecord> get history => List.unmodifiable(_history);
 
   bool isItemUnlocked(String itemId) => _unlockedItemIds.contains(itemId);
 
-  Future<bool> processPayment({
-    required String itemId,
-    required String itemTitle,
-    required double amount,
-    required String method,
-  }) async {
-    await Future.delayed(const Duration(milliseconds: 900));
+  Future<void> refreshPurchases() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      _unlockedItemIds.clear();
+      _history.clear();
+      changeNotifier.value++;
+      return;
+    }
 
-    final record = PaymentRecord(
-      id: 'tx_${DateTime.now().millisecondsSinceEpoch}',
-      itemTitle: itemTitle,
-      itemId: itemId,
-      amount: amount,
-      timestamp: 'Just now',
-      status: 'Success',
-      paymentMethod: method,
-      receiptId: 'REC-CS-${(10000 + _history.length * 17)}',
-    );
+    final rows = await _client
+        .from(SupabaseService.tableNotePurchases)
+        .select(
+          'id, document_id, amount, currency, status, purchased_at, '
+          'payment_method, provider_payment_id, note_documents(title)',
+        )
+        .eq('status', 'completed')
+        .order('purchased_at', ascending: false);
 
-    _history.insert(0, record);
-    _unlockedItemIds.add(itemId);
+    _unlockedItemIds
+      ..clear()
+      ..addAll(
+        List<Map<String, dynamic>>.from(rows)
+            .map((row) => row['document_id']?.toString())
+            .whereType<String>(),
+      );
+
+    _history
+      ..clear()
+      ..addAll(List<Map<String, dynamic>>.from(rows).map(_recordFromRow));
     changeNotifier.value++;
-    return true;
+  }
+
+  Future<CheckoutResult> startCheckout({required String itemId}) async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw StateError('Sign in before purchasing a PDF.');
+    }
+
+    final response = await _client.functions.invoke(
+      'create-note-checkout',
+      body: {
+        'document_id': itemId,
+        'return_url': Uri.base.toString(),
+      },
+    );
+    final data = Map<String, dynamic>.from(response.data as Map);
+    if (data['already_purchased'] == true) {
+      await refreshPurchases();
+      return const CheckoutResult(
+        alreadyPurchased: true,
+        checkoutOpened: false,
+      );
+    }
+
+    final checkoutUrl = data['checkout_url']?.toString();
+    if (checkoutUrl == null || checkoutUrl.isEmpty) {
+      throw StateError(data['error']?.toString() ?? 'Checkout is unavailable.');
+    }
+    openInBrowser(checkoutUrl);
+    return const CheckoutResult(
+      alreadyPurchased: false,
+      checkoutOpened: true,
+    );
+  }
+
+  Future<bool> waitForCompletedPurchase(
+    String itemId, {
+    int attempts = 20,
+  }) async {
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      await refreshPurchases();
+      if (isItemUnlocked(itemId)) return true;
+      if (attempt < attempts - 1) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+    return false;
+  }
+
+  PaymentRecord _recordFromRow(Map<String, dynamic> row) {
+    final document = row['note_documents'];
+    final title = document is Map
+        ? document['title']?.toString() ?? 'PDF purchase'
+        : 'PDF purchase';
+    final purchasedAt = DateTime.tryParse(row['purchased_at']?.toString() ?? '');
+    final localDate = purchasedAt?.toLocal();
+    final timestamp = localDate == null
+        ? 'Completed'
+        : '${localDate.year.toString().padLeft(4, '0')}-'
+            '${localDate.month.toString().padLeft(2, '0')}-'
+            '${localDate.day.toString().padLeft(2, '0')}';
+    return PaymentRecord(
+      id: row['id'].toString(),
+      itemTitle: title,
+      itemId: row['document_id'].toString(),
+      amount: (row['amount'] as num?)?.toDouble() ?? 0,
+      currency: row['currency']?.toString() ?? 'INR',
+      timestamp: timestamp,
+      status: 'Success',
+      paymentMethod: row['payment_method']?.toString() ?? 'Secure checkout',
+      receiptId: row['provider_payment_id']?.toString() ?? row['id'].toString(),
+    );
   }
 }

@@ -18,8 +18,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   final _usernameController = TextEditingController();
   bool _isRegister = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
@@ -53,6 +56,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     _usernameController.dispose();
     _animController.dispose();
     super.dispose();
@@ -493,25 +497,29 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                     fontSize: 14,
                                   ),
                                 ),
-                                TextButton(
-                                  onPressed: _showForgotPasswordDialog,
-                                  child: const Text(
-                                    'Forgot password?',
-                                    style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 13,
-                                      decoration: TextDecoration.underline,
+                                if (!_isRegister)
+                                  TextButton(
+                                    onPressed: _showForgotPasswordDialog,
+                                    child: const Text(
+                                      'Forgot password?',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 13,
+                                        decoration: TextDecoration.underline,
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             ),
                             TextFormField(
                               controller: _passwordController,
-                              obscureText: true,
+                              obscureText: _obscurePassword,
                               validator: (value) {
                                 if (value == null || value.isEmpty) {
                                   return 'Please enter your password';
+                                }
+                                if (_isRegister && value.length < 6) {
+                                  return 'Password must be at least 6 characters';
                                 }
                                 return null;
                               },
@@ -521,6 +529,14 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                 hintText: 'Enter your password',
                                 hintStyle: const TextStyle(color: Colors.white38),
                                 prefixIcon: const Icon(LucideIcons.lock, size: 18, color: Colors.white70),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword ? LucideIcons.eye : LucideIcons.eyeOff,
+                                    size: 18,
+                                    color: Colors.white54,
+                                  ),
+                                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                ),
                                 filled: true,
                                 fillColor: Colors.white.withOpacity(0.05),
                                 border: OutlineInputBorder(
@@ -537,6 +553,63 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                 ),
                               ),
                             ),
+
+                            // Confirm Password input (only in register mode)
+                            if (_isRegister) ...[
+                              const SizedBox(height: 20),
+                              const Text(
+                                'Confirm Password',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                controller: _confirmPasswordController,
+                                obscureText: _obscureConfirmPassword,
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please confirm your password';
+                                  }
+                                  if (value != _passwordController.text) {
+                                    return 'Passwords do not match';
+                                  }
+                                  return null;
+                                },
+                                style: const TextStyle(color: Colors.white),
+                                cursorColor: Colors.white,
+                                decoration: InputDecoration(
+                                  hintText: 'Re-enter your password',
+                                  hintStyle: const TextStyle(color: Colors.white38),
+                                  prefixIcon: const Icon(LucideIcons.lockKeyhole, size: 18, color: Colors.white70),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscureConfirmPassword ? LucideIcons.eye : LucideIcons.eyeOff,
+                                      size: 18,
+                                      color: Colors.white54,
+                                    ),
+                                    onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white.withOpacity(0.05),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(color: Color(0xFF54C5F8), width: 1.5),
+                                  ),
+                                ),
+                              ),
+                            ],
+
                             const SizedBox(height: 32),
 
                             // Login Button
@@ -581,6 +654,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                   onTap: () {
                                     setState(() {
                                       _isRegister = !_isRegister;
+                                      _obscurePassword = true;
+                                      _obscureConfirmPassword = true;
+                                      _confirmPasswordController.clear();
                                     });
                                   },
                                   child: Text(

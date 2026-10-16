@@ -1,16 +1,20 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'providers/auth_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_layout_screen.dart';
 import 'widgets/elastic_scroll_view.dart';
 import 'services/supabase_service.dart';
+import 'services/realtime_sync_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await pdfrxFlutterInitialize();
   await SupabaseService.initialize();
+  await RealtimeSyncService.instance.initialize();
   runApp(
     MultiProvider(
       providers: [
@@ -108,8 +112,7 @@ class _LoadingGateState extends State<LoadingGate>
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: ThemeProvider.primaryGold
-                        .withOpacity(_pulse.value),
+                    color: ThemeProvider.primaryGold.withOpacity(_pulse.value),
                     width: 3,
                   ),
                   boxShadow: [

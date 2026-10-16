@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,7 +9,9 @@ import '../widgets/spring_button.dart';
 import 'book_detail_screen.dart';
 import '../widgets/morphing_capsule.dart';
 import '../services/storage_picker.dart';
-import '../widgets/expandable_text.dart';
+import '../services/notes_service.dart';
+import '../services/supabase_service.dart';
+import '../services/realtime_sync_service.dart';
 import 'learn_screen.dart';
 
 class NotesScreen extends StatefulWidget {
@@ -18,14 +21,22 @@ class NotesScreen extends StatefulWidget {
   State<NotesScreen> createState() => _NotesScreenState();
 }
 
-class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin {
+class _NotesScreenState extends State<NotesScreen>
+    with TickerProviderStateMixin {
   late List<BookNote> _allBooks;
+  final Set<String> _deletingBookIds = {};
+  final Set<String> _updatingBookIds = {};
+  final Set<String> _starringBookIds = {};
+  bool _isLoadingDocuments = true;
+  String? _documentLoadError;
   String _searchQuery = '';
   int _selectedCategoryIndex = 0;
   int _selectedFilterTabIndex = 0;
   bool _showRoadmapView = false; // Toggle between Library & 30-Day Roadmap
 
   final TextEditingController _searchController = TextEditingController();
+  VoidCallback? _stopRealtime;
+  Timer? _realtimeRefreshTimer;
 
   final List<Map<String, dynamic>> _categories = [
     {'label': 'All', 'icon': LucideIcons.layoutGrid},
@@ -46,26 +57,65 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _allBooks = BookNoteData.getAllBooks();
+    _allBooks = [];
+    _loadServerDocuments();
+    _stopRealtime = RealtimeSyncService.instance.subscribe(
+      const {'note_documents', 'note_purchases', 'note_document_stars'},
+      (_) {
+        _realtimeRefreshTimer?.cancel();
+        _realtimeRefreshTimer =
+            Timer(const Duration(milliseconds: 250), _loadServerDocuments);
+      },
+    );
+  }
+
+  Future<void> _loadServerDocuments() async {
+    if (mounted) {
+      setState(() {
+        _isLoadingDocuments = true;
+        _documentLoadError = null;
+      });
+    }
+
+    try {
+      final documents = await NotesService.fetchDocuments();
+      if (!mounted) return;
+      setState(() {
+        _allBooks = documents;
+        _isLoadingDocuments = false;
+      });
+    } catch (error) {
+      debugPrint('Unable to load Supabase note documents: $error');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingDocuments = false;
+        _documentLoadError = 'Unable to load PDFs from Supabase.';
+      });
+    }
   }
 
   @override
   void dispose() {
+    _stopRealtime?.call();
+    _realtimeRefreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
   List<BookNote> get _featuredBooks {
-    return _allBooks.where((b) => b.isFeatured).toList();
+    return _allBooks.where((b) => b.hasRealPdf && b.isFeatured).toList();
   }
 
   List<BookNote> get _filteredBooks {
-    var list = List<BookNote>.from(_allBooks);
+    var list = _allBooks.where((book) => book.hasRealPdf).toList();
 
     // 1. Category filter
     if (_selectedCategoryIndex > 0) {
-      final selectedCat = _categories[_selectedCategoryIndex]['label'] as String;
-      list = list.where((b) => b.category.toLowerCase() == selectedCat.toLowerCase()).toList();
+      final selectedCat =
+          _categories[_selectedCategoryIndex]['label'] as String;
+      list = list
+          .where((b) => b.category.toLowerCase() == selectedCat.toLowerCase())
+          .toList();
     }
 
     // 2. Sub-tab filter
@@ -87,11 +137,13 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
     // 3. Search query
     if (_searchQuery.trim().isNotEmpty) {
       final q = _searchQuery.toLowerCase().trim();
-      list = list.where((b) =>
-          b.title.toLowerCase().contains(q) ||
-          b.author.toLowerCase().contains(q) ||
-          b.category.toLowerCase().contains(q) ||
-          b.description.toLowerCase().contains(q)).toList();
+      list = list
+          .where((b) =>
+              b.title.toLowerCase().contains(q) ||
+              b.author.toLowerCase().contains(q) ||
+              b.category.toLowerCase().contains(q) ||
+              b.description.toLowerCase().contains(q))
+          .toList();
     }
 
     return list;
@@ -108,6 +160,7 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
             book: book,
             heroTag: effectiveTag,
             onBookmarkToggle: () => setState(() {}),
+            onStarToggle: () => setState(() {}),
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -139,7 +192,9 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
         content: Row(
           children: [
             Icon(
-              book.isBookmarked ? LucideIcons.bookmarkCheck : LucideIcons.bookmarkMinus,
+              book.isBookmarked
+                  ? LucideIcons.bookmarkCheck
+                  : LucideIcons.bookmarkMinus,
               color: Colors.white,
               size: 20,
             ),
@@ -157,25 +212,306 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
     );
   }
 
+  Future<void> _toggleStar(BookNote book) async {
+    if (_starringBookIds.contains(book.id)) return;
+    setState(() => _starringBookIds.add(book.id));
+    try {
+      final result = await NotesService.toggleStar(book);
+      if (!mounted) return;
+      setState(() {
+        book.isStarred = result.isStarred;
+        book.starCount = result.starCount;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.circleAlert,
+        label: error.toString().replaceFirst('Bad state: ', ''),
+        color: Colors.orange,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _starringBookIds.remove(book.id));
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteDocument(BookNote book) async {
+    if (book.ownerId != SupabaseService.currentUserId ||
+        _deletingBookIds.contains(book.id)) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF15161B),
+        title: const Text(
+          'Delete PDF?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          '“${book.title}” and its uploaded PDF files will be permanently deleted.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Color(0xFFEF4444)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _deletingBookIds.add(book.id));
+    try {
+      await NotesService.deleteDocument(book);
+      if (!mounted) return;
+      setState(() => _allBooks.removeWhere((item) => item.id == book.id));
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.trash2,
+        label: 'PDF deleted from your library',
+        color: const Color(0xFFEF4444),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.circleAlert,
+        label: 'Delete failed: $error',
+        color: Colors.orange,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _deletingBookIds.remove(book.id));
+      }
+    }
+  }
+
+  Future<void> _changeDocumentAccess(BookNote book) async {
+    if (book.ownerId != SupabaseService.currentUserId ||
+        _updatingBookIds.contains(book.id)) {
+      return;
+    }
+
+    final makePaid = book.isFree;
+    double price = 0;
+    if (makePaid) {
+      final priceController = TextEditingController(text: '199');
+      final enteredPrice = await showDialog<double>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: const Color(0xFF15161B),
+          title: const Text(
+            'Make this PDF paid',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: TextField(
+            controller: priceController,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              labelText: 'Price (INR)',
+              prefixText: '₹ ',
+              labelStyle: TextStyle(color: Colors.white70),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = double.tryParse(priceController.text.trim());
+                if (value != null && value > 0) {
+                  Navigator.pop(dialogContext, value);
+                }
+              },
+              child: const Text('Make Paid'),
+            ),
+          ],
+        ),
+      );
+      priceController.dispose();
+      if (enteredPrice == null || !mounted) return;
+      price = enteredPrice;
+    } else {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: const Color(0xFF15161B),
+          title: const Text(
+            'Make this PDF free?',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: const Text(
+            'Every user will be able to read all pages and download the PDF without payment.',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Make Free'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
+    setState(() => _updatingBookIds.add(book.id));
+    try {
+      await NotesService.updateDocumentAccess(
+        book,
+        isPaid: makePaid,
+        price: price,
+      );
+      final refreshedBooks = await NotesService.fetchDocuments();
+      if (!mounted) return;
+      setState(() => _allBooks = refreshedBooks);
+      MorphingCapsule.show(
+        context,
+        icon: makePaid ? LucideIcons.lockKeyhole : LucideIcons.lockOpen,
+        label: makePaid
+            ? 'Paid access enabled. ${book.previewPages} of ${book.pages} pages are public.'
+            : 'This PDF is now free. All ${book.pages} pages are available.',
+        color: const Color(0xFF54C5F8),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.circleAlert,
+        label: 'Access update failed: $error',
+        color: Colors.orange,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _updatingBookIds.remove(book.id));
+      }
+    }
+  }
+
+  Widget _buildOwnerDocumentMenu(BookNote book) {
+    final busy = _deletingBookIds.contains(book.id) ||
+        _updatingBookIds.contains(book.id);
+    if (busy) {
+      return const SizedBox(
+        width: 34,
+        height: 34,
+        child: Padding(
+          padding: EdgeInsets.all(8),
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Colors.white,
+          ),
+        ),
+      );
+    }
+
+    return PopupMenuButton<String>(
+      tooltip: 'Manage your PDF',
+      color: const Color(0xFF18191F),
+      padding: EdgeInsets.zero,
+      icon: const Icon(
+        LucideIcons.ellipsisVertical,
+        color: Colors.white,
+        size: 20,
+      ),
+      onSelected: (value) {
+        if (value == 'toggle_access') {
+          _changeDocumentAccess(book);
+        } else if (value == 'delete') {
+          _confirmDeleteDocument(book);
+        }
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem<String>(
+          value: 'toggle_access',
+          child: Row(
+            children: [
+              Icon(
+                book.isFree ? LucideIcons.lockKeyhole : LucideIcons.lockOpen,
+                color: const Color(0xFF54C5F8),
+                size: 17,
+              ),
+              const SizedBox(width: 9),
+              Text(
+                book.isFree ? 'Make Paid' : 'Make Free',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(
+                LucideIcons.trash2,
+                color: Color(0xFFEF4444),
+                size: 17,
+              ),
+              SizedBox(width: 9),
+              Text(
+                'Delete PDF',
+                style: TextStyle(color: Color(0xFFEF4444)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   void _openUploadDocumentSheet() async {
-    PickedMediaResult? pickedDoc = await getStoragePicker().pickDocument();
+    final initialPick = await getStoragePicker().pickDocument();
+    if (initialPick == null || !mounted) return;
+
+    late PreparedPdf preparedPdf;
+    try {
+      preparedPdf = await NotesService.preparePdf(initialPick);
+    } catch (error) {
+      if (!mounted) return;
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.fileWarning,
+        label: error.toString().replaceFirst('FormatException: ', ''),
+        color: Colors.orange,
+      );
+      return;
+    }
+    PickedMediaResult pickedDoc = initialPick;
 
     final titleCtrl = TextEditingController(
-      text: pickedDoc != null
-          ? pickedDoc.fileName.replaceAll('.pdf', '').replaceAll('_', ' ')
-          : 'My Advanced Guide',
+      text: pickedDoc.fileName.replaceAll('.pdf', '').replaceAll('_', ' '),
     );
     final authorCtrl = TextEditingController(text: 'You');
     final priceCtrl = TextEditingController(text: '199');
-    int selectedPages = pickedDoc != null
-        ? (pickedDoc.fileSize / (1024 * 16)).round().clamp(1, 500)
-        : 7;
-    final pagesCtrl = TextEditingController(text: '$selectedPages');
+    int selectedPages = preparedPdf.pageCount;
     String selectedCat = 'Document';
     bool isPaidDoc = true;
     String? coverImageUrl;
+    PickedMediaResult? pickedCover;
     Color coverPrimaryColor = const Color(0xFF0F172A);
     Color coverSecondaryColor = const Color(0xFF2563EB);
+    bool isUploading = false;
 
     final chapters = <Map<String, String>>[];
 
@@ -187,12 +523,14 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (modalCtx, setSheetState) {
-          final previewPages = (selectedPages * 0.05).ceil().clamp(1, selectedPages);
+          final previewPages = NotesService.previewPageCount(selectedPages);
 
           void editOrAddChapter({int? index}) {
             final existing = index != null ? chapters[index] : null;
-            final chTitleCtrl = TextEditingController(text: existing?['title'] ?? '');
-            final chPagesCtrl = TextEditingController(text: existing?['pages'] ?? '');
+            final chTitleCtrl =
+                TextEditingController(text: existing?['title'] ?? '');
+            final chPagesCtrl =
+                TextEditingController(text: existing?['pages'] ?? '');
 
             showDialog(
               context: context,
@@ -206,32 +544,39 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                   ),
                   title: Text(
                     index != null ? 'Edit Chapter' : 'Add Chapter',
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold),
                   ),
                   content: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       TextField(
                         controller: chTitleCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 13),
                         decoration: InputDecoration(
                           labelText: 'Chapter Title',
                           labelStyle: const TextStyle(color: Colors.white60),
                           filled: true,
                           fillColor: Colors.white.withOpacity(0.06),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10)),
                         ),
                       ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: chPagesCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 13),
                         decoration: InputDecoration(
                           labelText: 'Page Range (e.g. 1–15)',
                           labelStyle: const TextStyle(color: Colors.white60),
                           filled: true,
                           fillColor: Colors.white.withOpacity(0.06),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10)),
                         ),
                       ),
                     ],
@@ -239,10 +584,13 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(dCtx),
-                      child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+                      child: const Text('Cancel',
+                          style: TextStyle(color: Colors.white60)),
                     ),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF54C5F8), foregroundColor: Colors.black),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF54C5F8),
+                          foregroundColor: Colors.black),
                       onPressed: () {
                         if (chTitleCtrl.text.trim().isNotEmpty) {
                           setSheetState(() {
@@ -283,7 +631,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
               ),
               decoration: BoxDecoration(
                 color: const Color(0xFF09090B).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(28)),
                 border: Border.all(color: Colors.white.withOpacity(0.18)),
               ),
               child: Column(
@@ -293,7 +642,9 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                     child: Container(
                       width: 40,
                       height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -302,17 +653,22 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                     children: [
                       Row(
                         children: const [
-                          Icon(LucideIcons.fileUp, color: Color(0xFF54C5F8), size: 22),
+                          Icon(LucideIcons.fileUp,
+                              color: Color(0xFF54C5F8), size: 22),
                           SizedBox(width: 10),
                           Text(
                             'Upload PDF / Document',
-                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                        icon: const Icon(LucideIcons.x,
+                            color: Colors.white70, size: 20),
                       ),
                     ],
                   ),
@@ -324,49 +680,79 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                     decoration: BoxDecoration(
                       color: const Color(0xFF54C5F8).withOpacity(0.12),
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+                      border: Border.all(
+                          color: const Color(0xFF54C5F8).withOpacity(0.35)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(LucideIcons.fileText, color: Color(0xFF54C5F8), size: 28),
+                        const Icon(LucideIcons.fileText,
+                            color: Color(0xFF54C5F8), size: 28),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                pickedDoc?.fileName ?? 'Custom Document Upload.pdf',
-                                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold),
+                                pickedDoc.fileName,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.bold),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '${pickedDoc?.formattedSize ?? "3.4 MB"} • $selectedPages Pages detected',
-                                style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11.5, fontWeight: FontWeight.w600),
+                                '${pickedDoc.formattedSize} • $selectedPages real PDF pages',
+                                style: const TextStyle(
+                                    color: Color(0xFF54C5F8),
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600),
                               ),
                             ],
                           ),
                         ),
                         SpringButton(
                           onTap: () async {
-                            final newPick = await getStoragePicker().pickDocument();
+                            final newPick =
+                                await getStoragePicker().pickDocument();
                             if (newPick != null) {
-                              setSheetState(() {
-                                pickedDoc = newPick;
-                                selectedPages = (newPick.fileSize / (1024 * 16)).round().clamp(1, 500);
-                                pagesCtrl.text = '$selectedPages';
-                                titleCtrl.text = newPick.fileName.replaceAll('.pdf', '').replaceAll('_', ' ');
-                              });
+                              try {
+                                final newPrepared =
+                                    await NotesService.preparePdf(newPick);
+                                setSheetState(() {
+                                  pickedDoc = newPick;
+                                  preparedPdf = newPrepared;
+                                  selectedPages = newPrepared.pageCount;
+                                  titleCtrl.text = newPick.fileName
+                                      .replaceAll('.pdf', '')
+                                      .replaceAll('_', ' ');
+                                });
+                              } catch (error) {
+                                if (!mounted) return;
+                                MorphingCapsule.show(
+                                  context,
+                                  icon: LucideIcons.fileWarning,
+                                  label: error
+                                      .toString()
+                                      .replaceFirst('FormatException: ', ''),
+                                  color: Colors.orange,
+                                );
+                              }
                             }
                           },
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Text('Change', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                            child: const Text('Change',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600)),
                           ),
                         ),
                       ],
@@ -382,21 +768,32 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Book Cover Style', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
+                            const Text('Book Cover Style',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.bold)),
                             SpringButton(
                               onTap: () async {
-                                final pickedImg = await getStoragePicker().pickImage();
+                                final pickedImg =
+                                    await getStoragePicker().pickImage();
                                 if (pickedImg != null) {
                                   setSheetState(() {
                                     coverImageUrl = pickedImg.pathOrDataUrl;
+                                    pickedCover = pickedImg;
                                   });
                                 }
                               },
                               child: Row(
                                 children: const [
-                                  Icon(LucideIcons.imagePlus, color: Color(0xFF54C5F8), size: 14),
+                                  Icon(LucideIcons.imagePlus,
+                                      color: Color(0xFF54C5F8), size: 14),
                                   SizedBox(width: 4),
-                                  Text('Upload Cover Image', style: TextStyle(color: Color(0xFF54C5F8), fontSize: 12, fontWeight: FontWeight.bold)),
+                                  Text('Upload Cover Image',
+                                      style: TextStyle(
+                                          color: Color(0xFF54C5F8),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold)),
                                 ],
                               ),
                             ),
@@ -409,7 +806,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.04),
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white.withOpacity(0.1)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.1)),
                           ),
                           child: Row(
                             children: [
@@ -424,10 +822,16 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                                       : LinearGradient(
                                           begin: Alignment.topLeft,
                                           end: Alignment.bottomRight,
-                                          colors: [coverPrimaryColor, coverSecondaryColor, const Color(0xFF121216)],
+                                          colors: [
+                                            coverPrimaryColor,
+                                            coverSecondaryColor,
+                                            const Color(0xFF121216)
+                                          ],
                                         ),
                                   image: coverImageUrl != null
-                                      ? DecorationImage(image: NetworkImage(coverImageUrl!), fit: BoxFit.cover)
+                                      ? DecorationImage(
+                                          image: NetworkImage(coverImageUrl!),
+                                          fit: BoxFit.cover)
                                       : null,
                                   boxShadow: [
                                     BoxShadow(
@@ -436,7 +840,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                                       offset: const Offset(2, 4),
                                     ),
                                   ],
-                                  border: Border.all(color: Colors.white.withOpacity(0.2)),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.2)),
                                 ),
                                 child: Stack(
                                   children: [
@@ -449,19 +854,27 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                                       child: Container(
                                         decoration: BoxDecoration(
                                           color: Colors.black.withOpacity(0.25),
-                                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(9)),
+                                          borderRadius:
+                                              const BorderRadius.horizontal(
+                                                  left: Radius.circular(9)),
                                         ),
                                       ),
                                     ),
                                     Center(
                                       child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10),
                                         child: Text(
-                                          titleCtrl.text.isNotEmpty ? titleCtrl.text : 'Guide',
+                                          titleCtrl.text.isNotEmpty
+                                              ? titleCtrl.text
+                                              : 'Guide',
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           textAlign: TextAlign.center,
-                                          style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold),
                                         ),
                                       ),
                                     ),
@@ -474,39 +887,76 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      coverImageUrl != null ? 'Custom Photo Cover Set' : 'Gradient Book Theme',
-                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                      coverImageUrl != null
+                                          ? 'Custom Photo Cover Set'
+                                          : 'Gradient Book Theme',
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold),
                                     ),
                                     const SizedBox(height: 4),
-                                    const Text('Choose theme colors or upload custom art', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                                    const Text(
+                                        'Choose theme colors or upload custom art',
+                                        style: TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 11)),
                                     const SizedBox(height: 8),
                                     // Theme pills
                                     Row(
                                       children: [
                                         ...[
-                                          {'name': 'Obsidian', 'p': const Color(0xFF0F172A), 's': const Color(0xFF2563EB)},
-                                          {'name': 'Emerald', 'p': const Color(0xFF064E3B), 's': const Color(0xFF10B981)},
-                                          {'name': 'Sunset', 'p': const Color(0xFF7C2D12), 's': const Color(0xFFF59E0B)},
-                                          {'name': 'Violet', 'p': const Color(0xFF4C1D95), 's': const Color(0xFFA855F7)},
+                                          {
+                                            'name': 'Obsidian',
+                                            'p': const Color(0xFF0F172A),
+                                            's': const Color(0xFF2563EB)
+                                          },
+                                          {
+                                            'name': 'Emerald',
+                                            'p': const Color(0xFF064E3B),
+                                            's': const Color(0xFF10B981)
+                                          },
+                                          {
+                                            'name': 'Sunset',
+                                            'p': const Color(0xFF7C2D12),
+                                            's': const Color(0xFFF59E0B)
+                                          },
+                                          {
+                                            'name': 'Violet',
+                                            'p': const Color(0xFF4C1D95),
+                                            's': const Color(0xFFA855F7)
+                                          },
                                         ].map((th) {
-                                          final isSel = coverPrimaryColor == th['p'] && coverImageUrl == null;
+                                          final isSel =
+                                              coverPrimaryColor == th['p'] &&
+                                                  coverImageUrl == null;
                                           return GestureDetector(
                                             onTap: () {
                                               setSheetState(() {
                                                 coverImageUrl = null;
-                                                coverPrimaryColor = th['p'] as Color;
-                                                coverSecondaryColor = th['s'] as Color;
+                                                pickedCover = null;
+                                                coverPrimaryColor =
+                                                    th['p'] as Color;
+                                                coverSecondaryColor =
+                                                    th['s'] as Color;
                                               });
                                             },
                                             child: Container(
-                                              margin: const EdgeInsets.only(right: 6),
+                                              margin: const EdgeInsets.only(
+                                                  right: 6),
                                               width: 22,
                                               height: 22,
                                               decoration: BoxDecoration(
                                                 shape: BoxShape.circle,
-                                                gradient: LinearGradient(colors: [th['p'] as Color, th['s'] as Color]),
+                                                gradient: LinearGradient(
+                                                    colors: [
+                                                      th['p'] as Color,
+                                                      th['s'] as Color
+                                                    ]),
                                                 border: Border.all(
-                                                  color: isSel ? Colors.white : Colors.transparent,
+                                                  color: isSel
+                                                      ? Colors.white
+                                                      : Colors.transparent,
                                                   width: 2,
                                                 ),
                                               ),
@@ -524,45 +974,74 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                         const SizedBox(height: 16),
 
                         // Title
-                        Text('Document Title', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12.5)),
+                        Text('Document Title',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.7),
+                                fontSize: 12.5)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: titleCtrl,
                           onChanged: (_) => setSheetState(() {}),
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
                             filled: true,
                             fillColor: Colors.white.withOpacity(0.06),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.white12)),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide:
+                                    const BorderSide(color: Colors.white12)),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
                           ),
                         ),
                         const SizedBox(height: 14),
 
                         // Category Selector
-                        Text('Category', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12.5)),
+                        Text('Category',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.7),
+                                fontSize: 12.5)),
                         const SizedBox(height: 6),
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(
-                            children: ['Document', 'Notes', 'Architecture', 'Programming', 'Cheatsheet'].map((cat) {
+                            children: [
+                              'Document',
+                              'Notes',
+                              'Architecture',
+                              'Programming',
+                              'Cheatsheet'
+                            ].map((cat) {
                               final isSel = selectedCat == cat;
                               return GestureDetector(
-                                onTap: () => setSheetState(() => selectedCat = cat),
+                                onTap: () =>
+                                    setSheetState(() => selectedCat = cat),
                                 child: Container(
                                   margin: const EdgeInsets.only(right: 8),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 7),
                                   decoration: BoxDecoration(
-                                    color: isSel ? const Color(0xFF54C5F8).withOpacity(0.2) : Colors.white.withOpacity(0.06),
+                                    color: isSel
+                                        ? const Color(0xFF54C5F8)
+                                            .withOpacity(0.2)
+                                        : Colors.white.withOpacity(0.06),
                                     borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: isSel ? const Color(0xFF54C5F8) : Colors.white12),
+                                    border: Border.all(
+                                        color: isSel
+                                            ? const Color(0xFF54C5F8)
+                                            : Colors.white12),
                                   ),
                                   child: Text(
                                     cat,
                                     style: TextStyle(
-                                      color: isSel ? const Color(0xFF54C5F8) : Colors.white70,
+                                      color: isSel
+                                          ? const Color(0xFF54C5F8)
+                                          : Colors.white70,
                                       fontSize: 12,
-                                      fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
+                                      fontWeight: isSel
+                                          ? FontWeight.bold
+                                          : FontWeight.w500,
                                     ),
                                   ),
                                 ),
@@ -572,62 +1051,40 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                         ),
                         const SizedBox(height: 14),
 
-                        // Page Count adjuster
+                        // Real page count reported by the PDF parser.
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Total Pages', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
-                                Text('5% Free Preview: $previewPages page${previewPages > 1 ? "s" : ""}', style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11)),
+                                const Text('Total Pages',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.bold)),
+                                Text(
+                                    '20% Paid Preview: $previewPages page${previewPages > 1 ? "s" : ""}',
+                                    style: const TextStyle(
+                                        color: Color(0xFF54C5F8),
+                                        fontSize: 11)),
                               ],
                             ),
-                            Row(
-                              children: [
-                                IconButton(
-                                  icon: const Icon(LucideIcons.minusCircle, color: Colors.white70, size: 20),
-                                  onPressed: () {
-                                    if (selectedPages > 1) {
-                                      setSheetState(() {
-                                        selectedPages -= 1;
-                                        pagesCtrl.text = '$selectedPages';
-                                      });
-                                    }
-                                  },
-                                ),
-                                SizedBox(
-                                  width: 64,
-                                  height: 36,
-                                  child: TextField(
-                                    controller: pagesCtrl,
-                                    keyboardType: TextInputType.number,
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                                    decoration: InputDecoration(
-                                      contentPadding: EdgeInsets.zero,
-                                      filled: true,
-                                      fillColor: Colors.white.withOpacity(0.08),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Colors.white12)),
-                                    ),
-                                    onChanged: (v) {
-                                      final p = int.tryParse(v);
-                                      if (p != null && p > 0) {
-                                        setSheetState(() => selectedPages = p);
-                                      }
-                                    },
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(LucideIcons.plusCircle, color: Colors.white70, size: 20),
-                                  onPressed: () {
-                                    setSheetState(() {
-                                      selectedPages += 1;
-                                      pagesCtrl.text = '$selectedPages';
-                                    });
-                                  },
-                                ),
-                              ],
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 9),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.white12),
+                              ),
+                              child: Text(
+                                '$selectedPages',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13),
+                              ),
                             ),
                           ],
                         ),
@@ -639,17 +1096,30 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                           children: [
                             Row(
                               children: [
-                                const Text('Chapters (', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
-                                Text('${chapters.length})', style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
+                                const Text('Chapters (',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.bold)),
+                                Text('${chapters.length})',
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.bold)),
                               ],
                             ),
                             SpringButton(
                               onTap: () => editOrAddChapter(),
                               child: Row(
                                 children: const [
-                                  Icon(LucideIcons.plus, color: Color(0xFF54C5F8), size: 14),
+                                  Icon(LucideIcons.plus,
+                                      color: Color(0xFF54C5F8), size: 14),
                                   SizedBox(width: 4),
-                                  Text('+ Add Chapter', style: TextStyle(color: Color(0xFF54C5F8), fontSize: 12, fontWeight: FontWeight.bold)),
+                                  Text('+ Add Chapter',
+                                      style: TextStyle(
+                                          color: Color(0xFF54C5F8),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold)),
                                 ],
                               ),
                             ),
@@ -658,20 +1128,24 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                         const SizedBox(height: 8),
                         if (chapters.isEmpty)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
                             decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.03),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: Colors.white.withOpacity(0.06)),
+                              border: Border.all(
+                                  color: Colors.white.withOpacity(0.06)),
                             ),
                             child: const Row(
                               children: [
-                                Icon(LucideIcons.filePlus, color: Colors.white38, size: 16),
+                                Icon(LucideIcons.filePlus,
+                                    color: Colors.white38, size: 16),
                                 SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     'No chapters added. Tap "+ Add Chapter" to add chapters from fresh.',
-                                    style: TextStyle(color: Colors.white54, fontSize: 11.5),
+                                    style: TextStyle(
+                                        color: Colors.white54, fontSize: 11.5),
                                   ),
                                 ),
                               ],
@@ -683,33 +1157,46 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                             final ch = entry.value;
                             return Container(
                               margin: const EdgeInsets.only(bottom: 6),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
                                 color: Colors.white.withOpacity(0.04),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.white.withOpacity(0.08)),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.08)),
                               ),
                               child: Row(
                                 children: [
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Text(ch['title']!, style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                                        Text(ch['title']!,
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w600)),
                                         const SizedBox(height: 2),
-                                        Text('Pages: ${ch['pages']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                                        Text('Pages: ${ch['pages']}',
+                                            style: const TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 11)),
                                       ],
                                     ),
                                   ),
                                   IconButton(
-                                    icon: const Icon(LucideIcons.pencil, color: Colors.white60, size: 14),
-                                    onPressed: () => editOrAddChapter(index: idx),
+                                    icon: const Icon(LucideIcons.pencil,
+                                        color: Colors.white60, size: 14),
+                                    onPressed: () =>
+                                        editOrAddChapter(index: idx),
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints(),
                                   ),
                                   const SizedBox(width: 10),
                                   IconButton(
-                                    icon: const Icon(LucideIcons.trash2, color: Color(0xFFEF4444), size: 14),
+                                    icon: const Icon(LucideIcons.trash2,
+                                        color: Color(0xFFEF4444), size: 14),
                                     onPressed: () {
                                       setSheetState(() {
                                         chapters.removeAt(idx);
@@ -730,26 +1217,42 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.05),
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white.withOpacity(0.1)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.1)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: const [
-                                      Text('Paid Document', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                                      SizedBox(height: 2),
-                                      Text('Only 5% preview visible, 95% blurred until unlocked', style: TextStyle(color: Colors.white54, fontSize: 11)),
-                                    ],
+                                  const Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text('Paid Document',
+                                            style: TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14)),
+                                        SizedBox(height: 2),
+                                        Text(
+                                            'First 20% readable, remaining pages locked until payment',
+                                            style: TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 11,
+                                                height: 1.3)),
+                                      ],
+                                    ),
                                   ),
+                                  const SizedBox(width: 10),
                                   Switch(
                                     value: isPaidDoc,
                                     activeColor: const Color(0xFF54C5F8),
-                                    onChanged: (val) => setSheetState(() => isPaidDoc = val),
+                                    onChanged: (val) =>
+                                        setSheetState(() => isPaidDoc = val),
                                   ),
                                 ],
                               ),
@@ -757,21 +1260,35 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                                 const SizedBox(height: 10),
                                 Row(
                                   children: [
-                                    const Text('Price (INR ₹):', style: TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                                    const Text('Price (INR ₹):',
+                                        style: TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w600)),
                                     const SizedBox(width: 10),
                                     SizedBox(
                                       width: 100,
                                       height: 38,
                                       child: TextField(
                                         controller: priceCtrl,
-                                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold),
                                         decoration: InputDecoration(
                                           prefixText: '₹ ',
-                                          prefixStyle: const TextStyle(color: Color(0xFF54C5F8), fontWeight: FontWeight.bold),
+                                          prefixStyle: const TextStyle(
+                                              color: Color(0xFF54C5F8),
+                                              fontWeight: FontWeight.bold),
                                           filled: true,
-                                          fillColor: Colors.white.withOpacity(0.08),
-                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          fillColor:
+                                              Colors.white.withOpacity(0.08),
+                                          border: OutlineInputBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(8)),
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                  horizontal: 10, vertical: 8),
                                         ),
                                       ),
                                     ),
@@ -788,67 +1305,61 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
 
                   // Publish Button
                   SpringButton(
-                    onTap: () {
-                      final title = titleCtrl.text.trim().isNotEmpty ? titleCtrl.text.trim() : 'Flutter Architecture Notes';
-                      final priceFormatted = isPaidDoc ? '₹${priceCtrl.text.trim()}' : 'Free';
-                      final newBook = BookNote(
-                        id: 'book_uploaded_${DateTime.now().millisecondsSinceEpoch}',
-                        title: title,
-                        subtitle: 'Uploaded Document • $selectedPages Pages',
-                        author: authorCtrl.text.trim(),
-                        category: selectedCat,
-                        rating: 5.0,
-                        reviewCount: 1,
-                        pages: selectedPages,
-                        price: priceFormatted,
-                        isFree: !isPaidDoc,
-                        badge: 'New',
-                        primaryColor: coverPrimaryColor,
-                        secondaryColor: coverSecondaryColor,
-                        coverImageUrl: coverImageUrl,
-                        pdfUrl: pickedDoc?.pathOrDataUrl,
-                        categoryIcon: selectedCat == 'Programming'
-                            ? LucideIcons.code2
-                            : (selectedCat == 'Architecture' ? LucideIcons.layers : LucideIcons.fileText),
-                        coverCodeSnippet: selectedCat == 'Programming'
-                            ? '// $title\nclass DocumentOverview {\n  final pages = $selectedPages;\n  final access = "${isPaidDoc ? "5% Preview Blur" : "Free"}";\n}'
-                            : '',
-                        description: 'Complete uploaded reference document with $selectedPages pages of detailed notes, diagrams, and cheat sheets.',
-                        keyTakeaways: [
-                          'Comprehensive high-yield notes across $selectedPages pages',
-                          'Includes diagrams, architecture schematics and code samples',
-                          'Offline reading and download ready',
-                        ],
-                        fullReviewSummary: 'Top-rated newly uploaded developer guide.',
-                        reviews: [],
-                        chapters: chapters.map((c) => BookChapter(
-                          number: chapters.indexOf(c) + 1,
-                          title: c['title']!,
-                          duration: '15 min',
-                          summary: 'Chapter covers pages ${c['pages']}',
-                        )).toList(),
-                        readTime: '${(selectedPages * 1.5).toInt()} mins',
-                        difficulty: 'Intermediate',
-                        isFeatured: true,
-                      );
-
-                      setState(() {
-                        _allBooks.insert(0, newBook);
-                      });
-
-                      Navigator.pop(ctx);
-                      MorphingCapsule.show(
-                        context,
-                        icon: LucideIcons.checkCheck,
-                        label: 'Document uploaded ($selectedPages pages in INR ₹)!',
-                        color: const Color(0xFF54C5F8),
-                      );
+                    onTap: () async {
+                      if (isUploading) return;
+                      final title = titleCtrl.text.trim().isNotEmpty
+                          ? titleCtrl.text.trim()
+                          : 'Flutter Architecture Notes';
+                      final parsedPrice =
+                          double.tryParse(priceCtrl.text.trim()) ?? 0;
+                      if (isPaidDoc && parsedPrice <= 0) {
+                        MorphingCapsule.show(
+                          context,
+                          icon: LucideIcons.circleAlert,
+                          label: 'Enter a valid price for this paid PDF.',
+                          color: Colors.orange,
+                        );
+                        return;
+                      }
+                      setSheetState(() => isUploading = true);
+                      try {
+                        final newBook = await NotesService.uploadDocument(
+                          pdf: preparedPdf,
+                          cover: pickedCover,
+                          title: title,
+                          author: authorCtrl.text.trim(),
+                          category: selectedCat,
+                          isPaid: isPaidDoc,
+                          price: parsedPrice,
+                        );
+                        if (!mounted) return;
+                        setState(() => _allBooks.insert(0, newBook));
+                        Navigator.pop(ctx);
+                        MorphingCapsule.show(
+                          context,
+                          icon: LucideIcons.checkCheck,
+                          label: isPaidDoc
+                              ? '$selectedPages-page PDF uploaded with a $previewPages-page preview.'
+                              : '$selectedPages-page free PDF uploaded and ready to download.',
+                          color: const Color(0xFF54C5F8),
+                        );
+                      } catch (error) {
+                        if (!mounted) return;
+                        setSheetState(() => isUploading = false);
+                        MorphingCapsule.show(
+                          context,
+                          icon: LucideIcons.cloudOff,
+                          label: 'Upload failed: $error',
+                          color: Colors.orange,
+                        );
+                      }
                     },
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
+                        gradient: const LinearGradient(
+                            colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
@@ -859,10 +1370,22 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                         ],
                       ),
                       alignment: Alignment.center,
-                      child: Text(
-                        'Publish Document ($selectedPages Pages)',
-                        style: const TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.bold),
-                      ),
+                      child: isUploading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              'Publish PDF ($selectedPages Pages)',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.bold),
+                            ),
                     ),
                   ),
                 ],
@@ -947,7 +1470,9 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                               const SizedBox(height: 24),
 
                               // 3. Featured Books Carousel (shown when not searching)
-                              if (_searchQuery.trim().isEmpty && _selectedCategoryIndex == 0) ...[
+                              if (_searchQuery.trim().isEmpty &&
+                                  _selectedCategoryIndex == 0 &&
+                                  _featuredBooks.isNotEmpty) ...[
                                 _buildFeaturedSectionHeader(),
                                 const SizedBox(height: 14),
                                 _buildFeaturedBooksCarousel(),
@@ -1002,7 +1527,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                           ),
                         ],
                       ),
-                      child: const Icon(LucideIcons.bookOpen, color: Colors.white, size: 18),
+                      child: const Icon(LucideIcons.bookOpen,
+                          color: Colors.white, size: 18),
                     ),
                   ),
                 ),
@@ -1081,7 +1607,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
         decoration: BoxDecoration(
           color: isSelected ? const Color(0x38FFFFFF) : Colors.transparent,
           borderRadius: BorderRadius.circular(16),
-          border: isSelected ? Border.all(color: const Color(0x40FFFFFF)) : null,
+          border:
+              isSelected ? Border.all(color: const Color(0x40FFFFFF)) : null,
         ),
         child: Text(
           title,
@@ -1115,17 +1642,20 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Row(
                   children: [
-                    const Icon(LucideIcons.search, color: Color(0x80FFFFFF), size: 18),
+                    const Icon(LucideIcons.search,
+                        color: Color(0x80FFFFFF), size: 18),
                     const SizedBox(width: 10),
                     Expanded(
                       child: TextField(
                         controller: _searchController,
                         onChanged: (val) => setState(() => _searchQuery = val),
-                        style: const TextStyle(color: Colors.white, fontSize: 13.5),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 13.5),
                         cursorColor: Colors.white,
                         decoration: const InputDecoration(
                           hintText: 'Search books, notes, guides...',
-                          hintStyle: TextStyle(color: Color(0x66FFFFFF), fontSize: 13),
+                          hintStyle:
+                              TextStyle(color: Color(0x66FFFFFF), fontSize: 13),
                           filled: false,
                           fillColor: Colors.transparent,
                           border: InputBorder.none,
@@ -1142,7 +1672,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                           _searchController.clear();
                           setState(() => _searchQuery = '');
                         },
-                        child: const Icon(LucideIcons.x, color: Colors.white70, size: 16),
+                        child: const Icon(LucideIcons.x,
+                            color: Colors.white70, size: 16),
                       ),
                   ],
                 ),
@@ -1156,7 +1687,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
         SpringButton(
           onTap: () {
             setState(() {
-              _selectedCategoryIndex = (_selectedCategoryIndex + 1) % _categories.length;
+              _selectedCategoryIndex =
+                  (_selectedCategoryIndex + 1) % _categories.length;
             });
           },
           child: ClipRRect(
@@ -1173,7 +1705,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                 ),
                 child: const Row(
                   children: [
-                    Icon(LucideIcons.slidersHorizontal, color: Colors.white, size: 16),
+                    Icon(LucideIcons.slidersHorizontal,
+                        color: Colors.white, size: 16),
                     SizedBox(width: 6),
                     Text(
                       'Filter',
@@ -1215,10 +1748,14 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
               curve: AppAnimations.snappy,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: isSelected ? const Color(0x38FFFFFF) : const Color(0x12FFFFFF),
+                color: isSelected
+                    ? const Color(0x38FFFFFF)
+                    : const Color(0x12FFFFFF),
                 borderRadius: BorderRadius.circular(19),
                 border: Border.all(
-                  color: isSelected ? const Color(0x66FFFFFF) : const Color(0x26FFFFFF),
+                  color: isSelected
+                      ? const Color(0x66FFFFFF)
+                      : const Color(0x26FFFFFF),
                   width: isSelected ? 1.2 : 1.0,
                 ),
                 boxShadow: isSelected
@@ -1242,9 +1779,11 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                   Text(
                     cat['label'] as String,
                     style: TextStyle(
-                      color: isSelected ? Colors.white : const Color(0xCCFFFFFF),
+                      color:
+                          isSelected ? Colors.white : const Color(0xCCFFFFFF),
                       fontSize: 12.5,
-                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                      fontWeight:
+                          isSelected ? FontWeight.w800 : FontWeight.w500,
                     ),
                   ),
                 ],
@@ -1287,7 +1826,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                 ),
               ),
               SizedBox(width: 4),
-              Icon(LucideIcons.chevronRight, color: Color(0xB3FFFFFF), size: 15),
+              Icon(LucideIcons.chevronRight,
+                  color: Color(0xB3FFFFFF), size: 15),
             ],
           ),
         ),
@@ -1401,11 +1941,13 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                             child: BackdropFilter(
                               filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
                                 decoration: BoxDecoration(
                                   color: const Color(0x38FFFFFF),
                                   borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0x4DFFFFFF)),
+                                  border: Border.all(
+                                      color: const Color(0x4DFFFFFF)),
                                 ),
                                 child: Text(
                                   book.badge!,
@@ -1418,6 +1960,21 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                                 ),
                               ),
                             ),
+                          ),
+                        ),
+                      if (book.ownerId == SupabaseService.currentUserId)
+                        Positioned(
+                          top: 5,
+                          right: 5,
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: const Color(0xCC111218),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            child: _buildOwnerDocumentMenu(book),
                           ),
                         ),
                     ],
@@ -1441,22 +1998,51 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(LucideIcons.star, color: Colors.white, size: 12),
-                          const SizedBox(width: 4),
-                          Text(
-                            book.rating.toStringAsFixed(1),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _toggleStar(book),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 3,
+                            vertical: 4,
                           ),
-                        ],
+                          child: Row(
+                            children: [
+                              if (_starringBookIds.contains(book.id))
+                                const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                    color: Color(0xFFFFC857),
+                                  ),
+                                )
+                              else
+                                Icon(
+                                  LucideIcons.star,
+                                  color: book.isStarred
+                                      ? const Color(0xFFFFC857)
+                                      : Colors.white,
+                                  size: 13,
+                                ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${book.starCount}',
+                                style: TextStyle(
+                                  color: book.isStarred
+                                      ? const Color(0xFFFFC857)
+                                      : Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: const Color(0x1FFFFFFF),
                           borderRadius: BorderRadius.circular(6),
@@ -1506,9 +2092,12 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                 duration: AppAnimations.quick,
                 curve: AppAnimations.snappy,
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0x38FFFFFF) : Colors.transparent,
+                  color:
+                      isSelected ? const Color(0x38FFFFFF) : Colors.transparent,
                   borderRadius: BorderRadius.circular(18),
-                  border: isSelected ? Border.all(color: const Color(0x33FFFFFF)) : null,
+                  border: isSelected
+                      ? Border.all(color: const Color(0x33FFFFFF))
+                      : null,
                 ),
                 alignment: Alignment.center,
                 child: FittedBox(
@@ -1519,15 +2108,19 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                       Icon(
                         tab['icon'] as IconData,
                         size: 13,
-                        color: isSelected ? Colors.white : const Color(0x80FFFFFF),
+                        color:
+                            isSelected ? Colors.white : const Color(0x80FFFFFF),
                       ),
                       const SizedBox(width: 5),
                       Text(
                         tab['label'] as String,
                         style: TextStyle(
-                          color: isSelected ? Colors.white : const Color(0x80FFFFFF),
+                          color: isSelected
+                              ? Colors.white
+                              : const Color(0x80FFFFFF),
                           fontSize: 11.5,
-                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                          fontWeight:
+                              isSelected ? FontWeight.w800 : FontWeight.w500,
                         ),
                       ),
                     ],
@@ -1543,31 +2136,86 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
 
   // ── 5. Vertical Liquid Glass Book & Notes List ──────────────────────────────
   Widget _buildVerticalBooksList(List<BookNote> books) {
-    if (books.isEmpty) {
+    if (_isLoadingDocuments) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 48),
+        child: Center(
+          child: CircularProgressIndicator(color: Color(0xFF54C5F8)),
+        ),
+      );
+    }
+
+    if (_documentLoadError != null) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 40),
         alignment: Alignment.center,
         child: Column(
           children: [
-            const Icon(LucideIcons.searchX, color: Colors.white30, size: 40),
+            const Icon(LucideIcons.cloudOff, color: Colors.white30, size: 40),
             const SizedBox(height: 12),
-            const Text(
-              'No books found matching your criteria',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
+            Text(
+              _documentLoadError!,
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            SpringButton(
+              onTap: _loadServerDocuments,
+              child: const Text(
+                'Retry',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (books.isEmpty) {
+      final libraryIsEmpty = _allBooks.isEmpty;
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        alignment: Alignment.center,
+        child: Column(
+          children: [
+            Icon(
+              libraryIsEmpty ? LucideIcons.filePlus2 : LucideIcons.searchX,
+              color: Colors.white30,
+              size: 40,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              libraryIsEmpty
+                  ? 'No PDFs have been uploaded yet'
+                  : 'No books found matching your criteria',
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
             ),
             const SizedBox(height: 8),
             SpringButton(
               onTap: () {
+                if (libraryIsEmpty) {
+                  _openUploadDocumentSheet();
+                  return;
+                }
                 setState(() {
                   _searchQuery = '';
                   _selectedCategoryIndex = 0;
+                  _selectedFilterTabIndex = 0;
                   _searchController.clear();
                 });
               },
-              child: const Text(
-                'Reset Filters',
-                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+              child: Text(
+                libraryIsEmpty ? 'Upload PDF' : 'Reset Filters',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -1631,7 +2279,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(book.categoryIcon, color: Colors.white70, size: 14),
+                        Icon(book.categoryIcon,
+                            color: Colors.white70, size: 14),
                         const Spacer(),
                         Text(
                           book.title,
@@ -1683,11 +2332,13 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                         children: [
                           // Liquid glass category capsule
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
                             decoration: BoxDecoration(
                               color: const Color(0x1AFFFFFF),
                               borderRadius: BorderRadius.circular(5),
-                              border: Border.all(color: const Color(0x26FFFFFF)),
+                              border:
+                                  Border.all(color: const Color(0x26FFFFFF)),
                             ),
                             child: Text(
                               book.category.toUpperCase(),
@@ -1714,7 +2365,8 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
 
                 // Liquid Glass Price Badge
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: const Color(0x1FFFFFFF),
                     borderRadius: BorderRadius.circular(10),
@@ -1731,30 +2383,38 @@ class _NotesScreenState extends State<NotesScreen> with TickerProviderStateMixin
                 ),
                 const SizedBox(width: 10),
 
-                // Liquid Glass Bookmark Icon Button
-                SpringButton(
-                  onTap: () => _toggleBookmark(book),
-                  child: Container(
+                if (book.ownerId == SupabaseService.currentUserId)
+                  SizedBox(
                     width: 36,
                     height: 36,
-                    decoration: BoxDecoration(
-                      color: book.isBookmarked
-                          ? const Color(0x40FFFFFF)
-                          : const Color(0x14FFFFFF),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
+                    child: _buildOwnerDocumentMenu(book),
+                  )
+                else
+                  SpringButton(
+                    onTap: () => _toggleBookmark(book),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
                         color: book.isBookmarked
-                            ? Colors.white
-                            : const Color(0x26FFFFFF),
+                            ? const Color(0x40FFFFFF)
+                            : const Color(0x14FFFFFF),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: book.isBookmarked
+                              ? Colors.white
+                              : const Color(0x26FFFFFF),
+                        ),
+                      ),
+                      child: Icon(
+                        book.isBookmarked
+                            ? LucideIcons.bookmarkCheck
+                            : LucideIcons.bookmark,
+                        color: Colors.white,
+                        size: 16,
                       ),
                     ),
-                    child: Icon(
-                      book.isBookmarked ? LucideIcons.bookmarkCheck : LucideIcons.bookmark,
-                      color: Colors.white,
-                      size: 16,
-                    ),
                   ),
-                ),
               ],
             ),
           ),

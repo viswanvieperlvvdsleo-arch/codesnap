@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import '../models/task.dart';
 import '../models/project.dart';
 import '../utils/mock_data.dart';
 import '../utils/app_animations.dart';
@@ -15,24 +14,28 @@ import '../services/workspace_service.dart';
 import '../services/terminal_service.dart';
 import '../services/live_server_service.dart';
 import 'chat_screen.dart';
-import '../widgets/spring_button.dart';
-import '../services/supabase_service.dart';
+import '../services/github_workspace_service.dart';
 import '../services/supabase_data_service.dart';
+import '../services/supabase_service.dart';
+import '../services/browser_workspace_picker.dart';
+import '../services/workspace_export_service.dart';
+import '../services/realtime_sync_service.dart';
+import '../services/ai_chat_service.dart';
 
 // ── Glass Theme Constants ──────────────────────────────────────────────────────
 class _G {
-  static const bg         = Color(0xFF09090B);
-  static const surface    = Color(0xFF111113);
-  static const glass      = Color(0x14FFFFFF);
-  static const glassHigh  = Color(0x38FFFFFF);
-  static const border     = Color(0x26FFFFFF);
+  static const bg = Color(0xFF09090B);
+  static const surface = Color(0xFF111113);
+  static const glass = Color(0x14FFFFFF);
+  static const glassHigh = Color(0x38FFFFFF);
+  static const border = Color(0x26FFFFFF);
   static const borderHigh = Color(0x38FFFFFF);
-  static const textPri    = Color(0xFFFFFFFF);
-  static const textSec    = Color(0xFF8888C9);
-  static const textMuted  = Color(0xFF555560);
-  static const radius     = 22.0;
-  static const blur       = 40.0;
-  static const sp         = 8.0;
+  static const textPri = Color(0xFFFFFFFF);
+  static const textSec = Color(0xFF8888C9);
+  static const textMuted = Color(0xFF555560);
+  static const radius = 22.0;
+  static const blur = 40.0;
+  static const sp = 8.0;
 }
 
 // ── Workspace Screen ──────────────────────────────────────────────────────────
@@ -40,12 +43,16 @@ class WorkspaceScreen extends StatefulWidget {
   final String? initialTaskId;
   final String? initialProjectId;
   final VoidCallback? onClearSelection;
+  final VoidCallback onOpenProjects;
+  final ValueChanged<String> onOpenRecentProject;
 
   const WorkspaceScreen({
     super.key,
     this.initialTaskId,
     this.initialProjectId,
     this.onClearSelection,
+    required this.onOpenProjects,
+    required this.onOpenRecentProject,
   });
 
   @override
@@ -61,17 +68,29 @@ class _EditorTab {
 
 class _WorkspaceScreenState extends State<WorkspaceScreen>
     with TickerProviderStateMixin {
-
   // ── Real Filesystem ───────────────────────────────────────────────────────
-  String? _workspaceRoot;   // String path — works on both native & web
+  String? _workspaceRoot; // String path — works on both native & web
   List<FileNode> _tree = [];
   bool _loadingWorkspace = true;
+  Project? _gitProject;
+  final Map<String, String> _gitBlobShas = {};
+  bool _pushingToGitHub = false;
+  String? _workspaceLoadError;
+  int _workspaceLoadRequest = 0;
+  bool _showWorkspaceLauncher = false;
+  final List<Project> _recentProjects = [];
+  bool _loadingRecentProjects = false;
+  VoidCallback? _stopRealtime;
+  Timer? _realtimeRefreshTimer;
+  GitRepositoryInfo? _personalPushRepository;
+  String? _personalPushBranch;
+  final Map<String, String> _personalGitBlobShas = {};
 
   // Active file & Multi-tab state
-  String _activeFile = '';       // file name (for tab)
-  String _activePath = '';       // absolute path on disk
-  String _activeCode = '';       // current in-memory content
-  Uint8List? _activeImageBytes;  // for image preview
+  String _activeFile = ''; // file name (for tab)
+  String _activePath = ''; // absolute path on disk
+  String _activeCode = ''; // current in-memory content
+  Uint8List? _activeImageBytes; // for image preview
   bool _hasUnsaved = false;
   final List<_EditorTab> _openTabs = [];
 
@@ -86,7 +105,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   // ── UI state ─────────────────────────────────────────────────────────────
   bool _explorerOpen = true;
   bool _terminalOpen = false;
-  int  _leftNav = 0;
+  int _leftNav = 0;
   bool _searchExpanded = false;
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
@@ -95,24 +114,27 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   final List<ChatMessage> _workspaceAiMessages = [
     ChatMessage(
       id: 'ws_ai_welcome',
-      text: '⚡ [Remote Terminal AI Connected]\nActive Engine: Claude 3.5 Sonnet\nHost: dev-worker (tmux:0)\nI have real-time access to your workspace files and terminal.',
+      text:
+          '⚡ [Remote Terminal AI Connected]\nActive Engine: Claude 3.5 Sonnet\nHost: dev-worker (tmux:0)\nI have real-time access to your workspace files and terminal.',
       isMe: false,
       time: 'Now',
-      codeSnippet: '// Tap [⚡ Apply to Editor] on any code snippet to update your file instantly!',
+      codeSnippet:
+          '// Tap [⚡ Apply to Editor] on any code snippet to update your file instantly!',
       codeLang: 'dart',
       isDelivered: true,
     ),
   ];
   final TextEditingController _workspaceAiCtrl = TextEditingController();
   final ScrollController _workspaceAiScroll = ScrollController();
-  String _workspaceAiModel = 'Claude 3.5 Sonnet';
+  String _workspaceAiModel = 'OpenAI';
   bool _workspaceAiThinking = false;
+  String? _workspaceAiThreadId;
 
   // ── Terminal ─────────────────────────────────────────────────────────────
   final List<String> _termLogs = [];
-  final _termCtrl   = TextEditingController();
+  final _termCtrl = TextEditingController();
   final _termScroll = ScrollController();
-  final _termFocus  = FocusNode();
+  final _termFocus = FocusNode();
   final List<String> _cmdHistory = [];
   int _historyIndex = -1;
   TerminalService? _terminalService;
@@ -123,7 +145,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   // ── Animation ─────────────────────────────────────────────────────────────
   late AnimationController _explorerAnim;
-  late Animation<double>   _explorerSlide;
+  late Animation<double> _explorerSlide;
 
   // ── Auto-save debounce ────────────────────────────────────────────────────
   final Map<String, String> _inMemoryFiles = {};
@@ -131,6 +153,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   @override
   void initState() {
     super.initState();
+
+    // The assistant history comes from the authenticated backend, never demo rows.
+    _workspaceAiMessages.clear();
 
     _liveServerService = LiveServerService();
 
@@ -147,35 +172,182 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     // WebView (Android/iOS only)
     if (!kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
-         defaultTargetPlatform == TargetPlatform.iOS)) {
+            defaultTargetPlatform == TargetPlatform.iOS)) {
       _webCtrl = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
         ..setBackgroundColor(const Color(0xFF09090B));
     }
 
     _initWorkspace();
+    _stopRealtime = RealtimeSyncService.instance.subscribe(
+      const {'workspace_projects', 'workspace_files'},
+      (_) {
+        _realtimeRefreshTimer?.cancel();
+        _realtimeRefreshTimer =
+            Timer(const Duration(milliseconds: 250), _loadRecentProjects);
+      },
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant WorkspaceScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialProjectId != widget.initialProjectId ||
+        oldWidget.initialTaskId != widget.initialTaskId) {
+      _reloadSelectedWorkspace();
+    }
+  }
+
+  Future<void> _reloadSelectedWorkspace() async {
+    _terminalService?.dispose();
+    await _liveServerService?.stop();
+    if (!mounted) return;
+    setState(() {
+      _loadingWorkspace = true;
+      _workspaceLoadError = null;
+      _gitProject = null;
+      _gitBlobShas.clear();
+      _personalPushRepository = null;
+      _personalPushBranch = null;
+      _personalGitBlobShas.clear();
+      _tree = [];
+      _openTabs.clear();
+      _inMemoryFiles.clear();
+      _activeFile = '';
+      _activePath = '';
+      _activeCode = '';
+      _activeImageBytes = null;
+      _hasUnsaved = false;
+      _termLogs.clear();
+    });
+    await _initWorkspace();
   }
 
   Future<void> _initWorkspace() async {
+    final loadRequest = ++_workspaceLoadRequest;
+    if (widget.initialProjectId == null && widget.initialTaskId == null) {
+      _showWorkspaceLauncher = true;
+      _workspaceRoot = null;
+      _tree = [];
+      _loadingWorkspace = false;
+      await _loadRecentProjects();
+      if (mounted) setState(() {});
+      return;
+    }
+    _showWorkspaceLauncher = false;
     // Determine project name
     String projectName = 'MyBug_Workspace';
+    Project? selectedProject;
     if (widget.initialProjectId != null) {
       try {
-        final proj = MockData.mockProjects
+        selectedProject = MockData.mockProjects
             .firstWhere((p) => p.id == widget.initialProjectId);
-        projectName = proj.title.replaceAll(' ', '_');
+        projectName = selectedProject.isGitHubProject
+            ? '${selectedProject.gitOwner}_${selectedProject.gitRepoName}'
+            : selectedProject.title.replaceAll(' ', '_');
       } catch (_) {}
     } else if (widget.initialTaskId != null) {
       projectName = 'Task_${widget.initialTaskId}';
     }
 
     final rootPath = await WorkspaceService.getWorkspaceRootPath(projectName);
+    if (!mounted || loadRequest != _workspaceLoadRequest) return;
 
-    // Load file tree (real disk on native, in-memory on web)
+    if (selectedProject?.isGitHubProject == true) {
+      await WorkspaceService.replaceWithRepositoryFiles(rootPath, const {});
+      try {
+        final loaded = await GithubWorkspaceService.loadRepository(
+          owner: selectedProject!.gitOwner!,
+          repo: selectedProject.gitRepoName!,
+          branch: selectedProject.gitBranch ?? 'main',
+        );
+        await WorkspaceService.replaceWithRepositoryFiles(
+            rootPath, loaded.files);
+        if (!mounted || loadRequest != _workspaceLoadRequest) return;
+        _gitBlobShas
+          ..clear()
+          ..addAll(loaded.blobShas);
+        _gitProject = selectedProject;
+        final runtimeMode =
+            !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+                ? 'local_windows'
+                : 'cloud';
+        try {
+          await SupabaseDataService.updateWorkspaceRuntimeMetadata(
+            projectId: selectedProject.id,
+            runtimeMode: runtimeMode,
+            runtimeMetadata: {
+              'engine': runtimeMode == 'local_windows'
+                  ? 'windows_shell'
+                  : 'external_runner',
+              'source': 'github',
+              'loaded_file_count': loaded.files.length,
+            },
+            sessionConfig: {
+              'owner': selectedProject.gitOwner,
+              'repository': selectedProject.gitRepoName,
+              'branch': selectedProject.gitBranch ?? 'main',
+            },
+          );
+        } catch (error) {
+          _termLogs.add('Runtime metadata sync warning: $error');
+        }
+        if (loaded.skippedFiles.isNotEmpty) {
+          _termLogs.add(
+            '${loaded.skippedFiles.length} binary or oversized files were skipped.',
+          );
+        }
+        await _loadRecentProjects();
+      } catch (error) {
+        _gitProject = selectedProject;
+        _workspaceLoadError = error.toString().replaceFirst('Bad state: ', '');
+      }
+    }
+
+    // Load file tree (real disk on native, in-memory on web).
     final tree = await WorkspaceService.loadTree(rootPath);
+    if (!mounted || loadRequest != _workspaceLoadRequest) return;
 
-    // Build TerminalService wired to our log list
-    final termSvc = TerminalService(
+    final termSvc = _createTerminalService(rootPath);
+
+    setState(() {
+      _workspaceRoot = rootPath;
+      _tree = tree;
+      _terminalService = termSvc;
+      _loadingWorkspace = false;
+    });
+
+    // Seed terminal with welcome banner
+    _termLogs.addAll([
+      '── Bug Workspace ─────────────────────────────',
+      'Project : $projectName',
+      'Path    : $rootPath',
+      if (_gitProject != null)
+        'GitHub  : ${_gitProject!.gitOwner}/${_gitProject!.gitRepoName}@${_gitProject!.gitBranch}',
+      if (_gitProject != null && !_ownsGitHubSource(_gitProject!))
+        'Access  : original repository is read-only; push only to your linked GitHub copy',
+      if (_workspaceLoadError != null) 'GitHub error: $_workspaceLoadError',
+      kIsWeb
+          ? '⚠️  Web preview mode — filesystem is in-memory'
+          : "Type 'help' for available commands.",
+      '',
+    ]);
+
+    // Auto-open the first file found (index.html → main.py → any)
+    final firstFile = _findFirstFile(_tree);
+    if (firstFile != null) {
+      await _openFile(firstFile);
+    }
+
+    // Handle initial task/project content overrides
+    if (_gitProject == null) {
+      _loadInitialContent();
+    }
+    widget.onClearSelection?.call();
+  }
+
+  TerminalService _createTerminalService(String rootPath) {
+    return TerminalService(
       workingDirectoryPath: rootPath,
       onLog: (line) {
         if (!mounted) return;
@@ -193,32 +365,29 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       },
       onLivePreviewRequest: () => _openInBrowser(),
     );
+  }
 
-    setState(() {
-      _workspaceRoot = rootPath;
-      _tree = tree;
-      _terminalService = termSvc;
-      _loadingWorkspace = false;
-    });
-
-    // Seed terminal with welcome banner
-    _termLogs.addAll([
-      '── Bug Workspace ─────────────────────────────',
-      'Project : $projectName',
-      'Path    : $rootPath',
-      kIsWeb ? '⚠️  Web preview mode — filesystem is in-memory' : "Type 'help' for available commands.",
-      '',
-    ]);
-
-    // Auto-open the first file found (index.html → main.py → any)
-    final firstFile = _findFirstFile(_tree);
-    if (firstFile != null) {
-      await _openFile(firstFile);
+  Future<void> _loadRecentProjects() async {
+    if (_loadingRecentProjects) return;
+    _loadingRecentProjects = true;
+    try {
+      final rows = await SupabaseDataService.fetchGitHubWorkspaceProjects();
+      final recent = rows.take(5).map(Project.fromWorkspaceRow).toList();
+      for (final project in recent) {
+        MockData.mockProjects.removeWhere((item) => item.id == project.id);
+        MockData.mockProjects.insert(0, project);
+      }
+      if (!mounted) return;
+      setState(() {
+        _recentProjects
+          ..clear()
+          ..addAll(recent);
+      });
+    } catch (_) {
+      // Recent projects are a convenience; the workspace remains usable.
+    } finally {
+      _loadingRecentProjects = false;
     }
-
-    // Handle initial task/project content overrides
-    _loadInitialContent();
-    widget.onClearSelection?.call();
   }
 
   /// Finds the first non-folder FileNode in the tree
@@ -234,8 +403,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   void _loadInitialContent() {
     if (widget.initialTaskId != null) {
       try {
-        final task = MockData.mockTasks
-            .firstWhere((t) => t.id == widget.initialTaskId);
+        final task =
+            MockData.mockTasks.firstWhere((t) => t.id == widget.initialTaskId);
         final taskFileName = 'task_${task.id}.dart';
         if (_workspaceRoot != null) {
           final path = '$_workspaceRoot/$taskFileName';
@@ -248,7 +417,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       try {
         final proj = MockData.mockProjects
             .firstWhere((p) => p.id == widget.initialProjectId);
-        final htmlContent = '<!DOCTYPE html>\n<html><head><style>${proj.cssTemplate}</style></head>\n'
+        final htmlContent =
+            '<!DOCTYPE html>\n<html><head><style>${proj.cssTemplate}</style></head>\n'
             '<body>${proj.htmlTemplate}<script>${proj.jsTemplate}</script></body></html>';
         if (_workspaceRoot != null) {
           final path = '$_workspaceRoot/index.html';
@@ -337,13 +507,338 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     final content = _inMemoryFiles[_activePath] ?? _activeCode;
     await WorkspaceService.writeFile(_activePath, content);
     if (mounted) setState(() => _hasUnsaved = false);
-    if (SupabaseService.isAuthenticated) {
-      final projectName = _workspaceRoot?.split(RegExp(r'[\\/]')).last ?? 'DefaultProject';
-      SupabaseDataService.saveWorkspaceProject(
-        projectName: projectName,
-        files: {_activeFile: content},
+  }
+
+  Future<bool> _ensureGitHubCredential() async {
+    if (GithubWorkspaceService.hasWriteCredential) return true;
+    final controller = TextEditingController();
+    final token = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF15161B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('GitHub write access',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Paste a fine-grained token with Contents read/write access. It stays in memory for this app session only.',
+              style: TextStyle(color: Colors.white60, fontSize: 12.5),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'GitHub token',
+                hintStyle: TextStyle(color: Colors.white38),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF54C5F8))),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('Use for this session'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (token == null || token.isEmpty) return false;
+    GithubWorkspaceService.setSessionToken(token);
+    return true;
+  }
+
+  bool _ownsGitHubSource(Project project) {
+    final currentUserId = SupabaseService.currentUserId;
+    return currentUserId != null && project.ownerId == currentUserId;
+  }
+
+  Future<bool> _ensurePersonalPushRepository(Project sourceProject) async {
+    if (_personalPushRepository != null && _personalPushBranch != null) {
+      return true;
+    }
+    if (!await _ensureGitHubCredential() || !mounted) return false;
+
+    final repoController = TextEditingController();
+    final branchController = TextEditingController(text: 'main');
+    final values = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF15161B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('Link your GitHub repository',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This community project is read-only. Your commits will go only to the different repository you link here.',
+              style: TextStyle(color: Colors.white60, fontSize: 12.5),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: repoController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Your repository URL',
+                hintText: 'https://github.com/you/my-copy',
+                labelStyle: TextStyle(color: Colors.white60),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF54C5F8))),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: branchController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Branch',
+                labelStyle: TextStyle(color: Colors.white60),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF54C5F8))),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, {
+              'url': repoController.text.trim(),
+              'branch': branchController.text.trim(),
+            }),
+            child: const Text('Link my repository'),
+          ),
+        ],
+      ),
+    );
+    repoController.dispose();
+    branchController.dispose();
+    if (values == null || values['url']!.isEmpty) return false;
+
+    try {
+      final repository =
+          await GithubWorkspaceService.inspectRepository(values['url']!);
+      if (repository.owner.toLowerCase() ==
+              sourceProject.gitOwner?.toLowerCase() &&
+          repository.name.toLowerCase() ==
+              sourceProject.gitRepoName?.toLowerCase()) {
+        throw StateError(
+            'Choose a different repository. The original project stays read-only.');
+      }
+      final branch = values['branch']!.isEmpty
+          ? repository.defaultBranch
+          : values['branch']!;
+      final tree = await GithubWorkspaceService.fetchTree(
+        owner: repository.owner,
+        repo: repository.name,
+        branch: branch,
+      );
+      if (!mounted) return false;
+      setState(() {
+        _personalPushRepository = repository;
+        _personalPushBranch = branch;
+        _personalGitBlobShas
+          ..clear()
+          ..addEntries(tree
+              .where((entry) => !entry.isDirectory)
+              .map((entry) => MapEntry(entry.path, entry.sha)));
+      });
+      _showWorkspaceMessage(
+          'Push destination: ${repository.owner}/${repository.name}@$branch');
+      return true;
+    } catch (error) {
+      _showWorkspaceMessage(
+        error.toString().replaceFirst('Bad state: ', ''),
+        isError: true,
+      );
+      return false;
+    }
+  }
+
+  Future<void> _pushCurrentFile() async {
+    final project = _gitProject;
+    final root = _workspaceRoot;
+    if (project == null ||
+        root == null ||
+        _activePath.isEmpty ||
+        _pushingToGitHub) {
+      return;
+    }
+    final ownsSource = _ownsGitHubSource(project);
+    if (ownsSource) {
+      if (!await _ensureGitHubCredential()) return;
+    } else if (!await _ensurePersonalPushRepository(project)) {
+      return;
+    }
+    await _saveCurrentFile();
+    if (!mounted) return;
+
+    final messageController = TextEditingController(
+      text: 'Update ${_activeFile.isEmpty ? 'workspace file' : _activeFile}',
+    );
+    final message = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => _GlassDialog(
+        title: ownsSource
+            ? 'Push commit to your GitHub project'
+            : 'Push commit to your personal copy',
+        hint: 'Commit message',
+        controller: messageController,
+        confirmLabel: 'Push commit',
+      ),
+    );
+    messageController.dispose();
+    if (message == null || message.trim().isEmpty) return;
+
+    final normalizedRoot =
+        root.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    final normalizedPath = _activePath.replaceAll('\\', '/');
+    if (!normalizedPath.startsWith('$normalizedRoot/')) {
+      _showWorkspaceMessage('This file is outside the linked repository.',
+          isError: true);
+      return;
+    }
+    final relativePath = normalizedPath.substring(normalizedRoot.length + 1);
+    final content = _inMemoryFiles[_activePath] ?? _activeCode;
+    final targetRepository = _personalPushRepository;
+    final owner = ownsSource ? project.gitOwner! : targetRepository!.owner;
+    final repository =
+        ownsSource ? project.gitRepoName! : targetRepository!.name;
+    final branch =
+        ownsSource ? project.gitBranch ?? 'main' : _personalPushBranch!;
+    final blobShas = ownsSource ? _gitBlobShas : _personalGitBlobShas;
+    setState(() => _pushingToGitHub = true);
+    try {
+      final result = await GithubWorkspaceService.commitFile(
+        sourceProjectId: project.id,
+        personalCopy: !ownsSource,
+        owner: owner,
+        repo: repository,
+        branch: branch,
+        path: relativePath,
+        content: content,
+        message: message.trim(),
+        sha: blobShas[relativePath],
+      );
+      blobShas[relativePath] = result.blobSha;
+      final shortSha = result.commitSha.length > 7
+          ? result.commitSha.substring(0, 7)
+          : result.commitSha;
+      _termLogs.add('Pushed $relativePath at $shortSha');
+      _showWorkspaceMessage('Commit pushed to $owner/$repository');
+    } catch (error) {
+      _showWorkspaceMessage(
+        error.toString().replaceFirst('Bad state: ', ''),
+        isError: true,
+      );
+    } finally {
+      if (mounted) setState(() => _pushingToGitHub = false);
+    }
+  }
+
+  Future<void> _downloadWorkspace() async {
+    final root = _workspaceRoot;
+    if (root == null) return;
+    await _saveCurrentFile();
+    if (!mounted) return;
+
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF15161B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('Download project',
+            style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading:
+                  const Icon(LucideIcons.fileArchive, color: Color(0xFF54C5F8)),
+              title: const Text('Edited workspace ZIP',
+                  style: TextStyle(color: Colors.white)),
+              subtitle: const Text(
+                'Includes your current local code changes',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              onTap: () => Navigator.pop(dialogContext, 'edited'),
+            ),
+            if (_gitProject != null)
+              ListTile(
+                leading: const Icon(LucideIcons.cloudDownload,
+                    color: Color(0xFFA78BFA)),
+                title: const Text('Original GitHub archive',
+                    style: TextStyle(color: Colors.white)),
+                subtitle: const Text(
+                  'Streams the complete public repository using the device download manager',
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+                onTap: () => Navigator.pop(dialogContext, 'original'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+
+    try {
+      if (choice == 'original') {
+        final project = _gitProject!;
+        await WorkspaceExportService.downloadOriginalGitHubArchive(
+          owner: project.gitOwner!,
+          repository: project.gitRepoName!,
+          branch: project.gitBranch ?? 'main',
+        );
+      } else {
+        final files = await WorkspaceService.snapshotTextFiles(root);
+        final projectName =
+            root.split(RegExp(r'[\\/]')).where((part) => part.isNotEmpty).last;
+        await WorkspaceExportService.downloadEditedWorkspace(
+          projectName: projectName,
+          files: files,
+        );
+      }
+      _showWorkspaceMessage('Project download started');
+    } catch (error) {
+      _showWorkspaceMessage(
+        error.toString().replaceFirst('Bad state: ', ''),
+        isError: true,
       );
     }
+  }
+
+  void _showWorkspaceMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor:
+            isError ? const Color(0xFF991B1B) : const Color(0xFF166534),
+      ),
+    );
   }
 
   Future<void> _refreshTree() async {
@@ -354,10 +849,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   void _onCodeChanged(String value) {
     _inMemoryFiles[_activePath] = value;
-    if (mounted) setState(() {
-      _activeCode = value;
-      _hasUnsaved = true;
-    });
+    if (mounted)
+      setState(() {
+        _activeCode = value;
+        _hasUnsaved = true;
+      });
   }
 
   Future<void> _showCreateDialog({required bool isFolder}) async {
@@ -470,30 +966,109 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   // ── Open Folder / Import Project ──────────────────────────────────────────
   Future<void> _showOpenFolderDialog() async {
-    // 1. On Windows desktop, launch the native Windows File Explorer folder picker directly
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-      final nativePath = await WorkspaceService.pickFolderNative(_workspaceRoot);
-      if (nativePath != null && nativePath.isNotEmpty) {
-        await _applyWorkspaceRoot(nativePath);
-        return;
-      }
-    }
+    await _importFromDevice();
+  }
 
-    if (!mounted) return;
-
-    // 2. Fallback / Android / Web: Open the interactive visual File Manager modal
-    final chosen = await showDialog<String>(
+  Future<String?> _chooseDeviceImportKind() {
+    return showModalBottomSheet<String>(
       context: context,
-      builder: (ctx) => _VisualFileManagerDialog(initialPath: _workspaceRoot),
+      backgroundColor: const Color(0xFF15161A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Open from device',
+                  style: GoogleFonts.inter(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              const Text(
+                'Files stay on this device and are never uploaded to Supabase.',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(height: 14),
+              ListTile(
+                leading: const Icon(LucideIcons.folderOpen,
+                    color: Color(0xFF54C5F8)),
+                title: const Text('Choose folder',
+                    style: TextStyle(color: Colors.white)),
+                subtitle: const Text('Open an existing project folder',
+                    style: TextStyle(color: Colors.white54)),
+                onTap: () => Navigator.pop(sheetContext, 'folder'),
+              ),
+              ListTile(
+                leading:
+                    const Icon(LucideIcons.fileCode, color: Color(0xFFA78BFA)),
+                title: const Text('Choose file',
+                    style: TextStyle(color: Colors.white)),
+                subtitle: const Text('Open one local code file',
+                    style: TextStyle(color: Colors.white54)),
+                onTap: () => Navigator.pop(sheetContext, 'file'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
+  }
 
-    if (chosen != null && chosen.isNotEmpty) {
-      await _applyWorkspaceRoot(chosen);
+  Future<void> _importFromDevice() async {
+    final kind = await _chooseDeviceImportKind();
+    if (kind == null || !mounted) return;
+
+    if (kIsWeb) {
+      final selection = await pickBrowserWorkspace(folder: kind == 'folder');
+      if (selection == null) return;
+      final root = await WorkspaceService.getWorkspaceRootPath(
+          'Device_${selection.projectName}');
+      await WorkspaceService.replaceWithRepositoryFiles(root, selection.files);
+      _showWorkspaceLauncher = false;
+      await _applyWorkspaceRoot(root);
+      if (selection.skippedFiles > 0) {
+        _showWorkspaceMessage(
+          '${selection.skippedFiles} binary or oversized files were skipped.',
+        );
+      }
+      return;
     }
+
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      if (kind == 'folder') {
+        final path = await WorkspaceService.pickFolderNative(_workspaceRoot);
+        if (path != null && path.isNotEmpty) {
+          _showWorkspaceLauncher = false;
+          await _applyWorkspaceRoot(path);
+        }
+      } else {
+        final path = await WorkspaceService.pickFileNative(_workspaceRoot);
+        if (path != null && path.isNotEmpty) {
+          final slash = path.lastIndexOf(RegExp(r'[\\/]'));
+          final parent = slash > 0 ? path.substring(0, slash) : path;
+          final name = slash >= 0 ? path.substring(slash + 1) : path;
+          _showWorkspaceLauncher = false;
+          await _applyWorkspaceRoot(parent);
+          await _openFileByPath(name, path);
+        }
+      }
+      return;
+    }
+
+    _showWorkspaceMessage(
+      'Device import is available in Chrome and the Windows app. Mobile can download workspace ZIP files locally.',
+      isError: true,
+    );
   }
 
   Future<void> _applyWorkspaceRoot(String rootPath) async {
     setState(() {
+      _showWorkspaceLauncher = false;
       _workspaceRoot = rootPath;
       _loadingWorkspace = true;
       _openTabs.clear();
@@ -505,7 +1080,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       _hasUnsaved = false;
     });
 
-    _terminalService?.setWorkingDirectory(rootPath);
+    _terminalService?.dispose();
+    _terminalService = _createTerminalService(rootPath);
     final sep = rootPath.contains('\\') ? '\\' : '/';
     final folderName = rootPath.split(sep).where((s) => s.isNotEmpty).last;
     _termLogs.add('📁 Switched terminal to: $folderName ($rootPath)');
@@ -534,8 +1110,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         confirmLabel: 'Rename',
       ),
     );
-    if (result != null && result.trim().isNotEmpty && result.trim() != node.name) {
-      final newPath = await WorkspaceService.renameNode(node.path, result.trim());
+    if (result != null &&
+        result.trim().isNotEmpty &&
+        result.trim() != node.name) {
+      final newPath =
+          await WorkspaceService.renameNode(node.path, result.trim());
       if (newPath != null && node.path == _activePath) {
         setState(() {
           _activeFile = result.trim();
@@ -570,7 +1149,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+            child:
+                const Text('Delete', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -578,7 +1158,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (ok == true) {
       await WorkspaceService.deleteNode(node.path, node.isFolder);
       if (node.path == _activePath) {
-        setState(() { _activeFile = ''; _activePath = ''; _activeCode = ''; });
+        setState(() {
+          _activeFile = '';
+          _activePath = '';
+          _activeCode = '';
+        });
       }
       await _refreshTree();
     }
@@ -677,13 +1261,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       });
     } else {
       // Direct file launch fallback
-      final filePath = _activePath.isNotEmpty ? _activePath : '$root/index.html';
+      final filePath =
+          _activePath.isNotEmpty ? _activePath : '$root/index.html';
       final ok = await LiveServerService.launchBrowser(filePath);
       setState(() {
         if (ok) {
           _termLogs.add('🚀 Opened file in default browser: $filePath');
         } else {
-          _termLogs.add('⚠️ Unable to open browser automatically. Path: $filePath');
+          _termLogs
+              .add('⚠️ Unable to open browser automatically. Path: $filePath');
         }
         _terminalOpen = true;
       });
@@ -700,7 +1286,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     final lower = _activePath.toLowerCase();
 
     // 1. Web files (HTML, CSS) -> Launch Live Server & Browser Preview!
-    if (lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.css')) {
+    if (lower.endsWith('.html') ||
+        lower.endsWith('.htm') ||
+        lower.endsWith('.css')) {
       await _openInBrowser();
       return;
     }
@@ -709,11 +1297,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (lower.endsWith('.js') || lower.endsWith('.mjs')) {
       final root = _workspaceRoot;
       final sep = root != null && root.contains('\\') ? '\\' : '/';
-      final hasHtml = root != null && await WorkspaceService.fileExists('$root${sep}index.html');
-      final isDomScript = _activeCode.contains('document.') || _activeCode.contains('window.') || hasHtml;
+      final hasHtml = root != null &&
+          await WorkspaceService.fileExists('$root${sep}index.html');
+      final isDomScript = _activeCode.contains('document.') ||
+          _activeCode.contains('window.') ||
+          hasHtml;
 
       if (isDomScript) {
-        _termLogs.add('🌐 Detected web frontend script. Launching browser preview…');
+        _termLogs
+            .add('🌐 Detected web frontend script. Launching browser preview…');
         await _openInBrowser();
       } else {
         await _terminalService!.runCommand('node "${_activePath}"');
@@ -734,7 +1326,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     }
 
     setState(() {
-      _termLogs.add('⚠️ Run not supported for this file type. Supported: HTML, JS, Python, Dart.');
+      _termLogs.add(
+          '⚠️ Run not supported for this file type. Supported: HTML, JS, Python, Dart.');
     });
   }
 
@@ -754,7 +1347,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (_historyIndex > 0) {
       _historyIndex--;
       _termCtrl.text = _cmdHistory[_historyIndex];
-      _termCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _termCtrl.text.length));
+      _termCtrl.selection = TextSelection.fromPosition(
+          TextPosition(offset: _termCtrl.text.length));
     }
   }
 
@@ -763,7 +1357,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     if (_historyIndex < _cmdHistory.length - 1) {
       _historyIndex++;
       _termCtrl.text = _cmdHistory[_historyIndex];
-      _termCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _termCtrl.text.length));
+      _termCtrl.selection = TextSelection.fromPosition(
+          TextPosition(offset: _termCtrl.text.length));
     } else {
       _historyIndex = _cmdHistory.length;
       _termCtrl.clear();
@@ -794,6 +1389,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
   @override
   void dispose() {
+    _stopRealtime?.call();
+    _realtimeRefreshTimer?.cancel();
     _inlineCtrl.dispose();
     _inlineFocus.dispose();
     _explorerAnim.dispose();
@@ -832,10 +1429,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   String get _lang {
     final lower = _activeFile.toLowerCase();
     if (lower.endsWith('.py')) return 'python';
-    if (lower.endsWith('.html') || lower.endsWith('.xml') || lower.endsWith('.svg')) return 'html';
-    if (lower.endsWith('.js') || lower.endsWith('.jsx') || lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.json')) return 'javascript';
+    if (lower.endsWith('.html') ||
+        lower.endsWith('.xml') ||
+        lower.endsWith('.svg')) return 'html';
+    if (lower.endsWith('.js') ||
+        lower.endsWith('.jsx') ||
+        lower.endsWith('.ts') ||
+        lower.endsWith('.tsx') ||
+        lower.endsWith('.json')) return 'javascript';
     if (lower.endsWith('.css') || lower.endsWith('.scss')) return 'css';
-    if (lower.endsWith('.md') || lower.endsWith('.txt') || lower.endsWith('.log') || lower.endsWith('.env') || lower.endsWith('.gitignore') || lower.endsWith('.lock')) return 'text';
+    if (lower.endsWith('.md') ||
+        lower.endsWith('.txt') ||
+        lower.endsWith('.log') ||
+        lower.endsWith('.env') ||
+        lower.endsWith('.gitignore') ||
+        lower.endsWith('.lock')) return 'text';
     return 'dart';
   }
 
@@ -845,7 +1453,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     }
     if (_workspaceRoot != null && _workspaceRoot!.isNotEmpty) {
       final sep = _workspaceRoot!.contains('\\') ? '\\' : '/';
-      final parts = _workspaceRoot!.split(sep).where((s) => s.isNotEmpty).toList();
+      final parts =
+          _workspaceRoot!.split(sep).where((s) => s.isNotEmpty).toList();
       final name = parts.isNotEmpty ? parts.last : 'workspace';
       return 'bug@$name> ';
     }
@@ -908,6 +1517,62 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       );
     }
 
+    if (_workspaceLoadError != null) {
+      return Container(
+        color: _G.bg,
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: _glass(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.cloudOff,
+                      color: Color(0xFFF87171), size: 36),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Could not load GitHub project',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _workspaceLoadError!,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      color: const Color(0xFFB8B8C5),
+                      fontSize: 12.5,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed: _reloadSelectedWorkspace,
+                    icon: const Icon(LucideIcons.refreshCw, size: 16),
+                    label: const Text('Retry loading repository'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_showWorkspaceLauncher) {
+      return _buildWorkspaceLauncher();
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final isLand = constraints.maxWidth > constraints.maxHeight;
@@ -917,6 +1582,210 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           child: isLand ? _buildLandscape(w) : _buildPortrait(w),
         );
       },
+    );
+  }
+
+  Widget _buildWorkspaceLauncher() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 760;
+        final recentPanel = Container(
+          width: wide ? 270 : null,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D0D10),
+            border: Border(
+              right: wide
+                  ? const BorderSide(color: Color(0x22FFFFFF))
+                  : BorderSide.none,
+              bottom: wide
+                  ? BorderSide.none
+                  : const BorderSide(color: Color(0x22FFFFFF)),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: wide ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              Text('RECENT PROJECTS',
+                  style: GoogleFonts.inter(
+                      color: _G.textSec,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.1)),
+              const SizedBox(height: 14),
+              if (_loadingRecentProjects)
+                const LinearProgressIndicator(minHeight: 2)
+              else if (_recentProjects.isEmpty)
+                const Text('No recently used Bug projects yet.',
+                    style: TextStyle(color: Colors.white38, fontSize: 12))
+              else
+                ..._recentProjects.map(_buildLauncherRecentProject),
+            ],
+          ),
+        );
+
+        final launcher = Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(28),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 68,
+                    height: 68,
+                    decoration: BoxDecoration(
+                      color: const Color(0x1F54C5F8),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: const Color(0x4454C5F8)),
+                    ),
+                    child: const Icon(LucideIcons.code2,
+                        color: Color(0xFF54C5F8), size: 32),
+                  ),
+                  const SizedBox(height: 20),
+                  Text('Start a workspace',
+                      style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Open local code or choose a project from Bug. Nothing is uploaded until you explicitly push to your own GitHub repository.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Color(0xFF9A9AA7), fontSize: 13, height: 1.5),
+                  ),
+                  const SizedBox(height: 28),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 14,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      _buildLauncherOption(
+                        icon: LucideIcons.hardDriveDownload,
+                        title: 'From Device',
+                        subtitle: 'Choose a folder or code file',
+                        onTap: _importFromDevice,
+                      ),
+                      _buildLauncherOption(
+                        icon: LucideIcons.folderKanban,
+                        title: 'From Bug Projects',
+                        subtitle: 'Browse uploaded and GitHub projects',
+                        onTap: widget.onOpenProjects,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'On phones, edited source can be downloaded as a ZIP. Large public GitHub archives are handed to the system download manager to avoid keeping the whole file in app memory.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white38, fontSize: 11.5, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        return Container(
+          color: _G.bg,
+          child: SafeArea(
+            child: wide
+                ? Row(children: [recentPanel, Expanded(child: launcher)])
+                : Column(children: [recentPanel, Expanded(child: launcher)]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLauncherOption({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        width: 260,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0x12FFFFFF),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0x2FFFFFFF)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: const Color(0x1F54C5F8),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Icon(icon, color: const Color(0xFF54C5F8), size: 22),
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 3),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11.5)),
+                ],
+              ),
+            ),
+            const Icon(LucideIcons.chevronRight,
+                color: Colors.white38, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLauncherRecentProject(Project project) {
+    return InkWell(
+      onTap: () => widget.onOpenRecentProject(project.id),
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+        child: Row(
+          children: [
+            const Icon(LucideIcons.gitBranch,
+                color: Color(0xFF54C5F8), size: 15),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(project.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(color: Colors.white, fontSize: 12.5)),
+                  Text(
+                    '${project.gitOwner}/${project.gitRepoName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(color: Colors.white38, fontSize: 10.5),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1004,7 +1873,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   //  TOP APP BAR — VS Code Menu Bar (File, Edit, Selection, View, Go, Run...)
   // ═══════════════════════════════════════════════════════════════════════════
   Widget _buildTopBar(double w, {required bool isLandscape}) {
-    final projectName = _workspaceRoot?.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).last ?? 'codesnap';
+    final projectName = _workspaceRoot
+            ?.split(RegExp(r'[\\/]'))
+            .where((s) => s.isNotEmpty)
+            .last ??
+        'codesnap';
 
     return Container(
       height: 38,
@@ -1049,27 +1922,34 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             GestureDetector(
               onTap: () {
                 if (_openTabs.length > 1) {
-                  final idx = _openTabs.indexWhere((t) => t.path == _activePath);
-                  if (idx > 0) _openFileByPath(_openTabs[idx - 1].name, _openTabs[idx - 1].path);
+                  final idx =
+                      _openTabs.indexWhere((t) => t.path == _activePath);
+                  if (idx > 0)
+                    _openFileByPath(
+                        _openTabs[idx - 1].name, _openTabs[idx - 1].path);
                 }
               },
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Icon(LucideIcons.arrowLeft, size: 13, color: Color(0xFF888899)),
+                child: Icon(LucideIcons.arrowLeft,
+                    size: 13, color: Color(0xFF888899)),
               ),
             ),
             GestureDetector(
               onTap: () {
                 if (_openTabs.length > 1) {
-                  final idx = _openTabs.indexWhere((t) => t.path == _activePath);
+                  final idx =
+                      _openTabs.indexWhere((t) => t.path == _activePath);
                   if (idx >= 0 && idx < _openTabs.length - 1) {
-                    _openFileByPath(_openTabs[idx + 1].name, _openTabs[idx + 1].path);
+                    _openFileByPath(
+                        _openTabs[idx + 1].name, _openTabs[idx + 1].path);
                   }
                 }
               },
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Icon(LucideIcons.arrowRight, size: 13, color: Color(0xFF888899)),
+                child: Icon(LucideIcons.arrowRight,
+                    size: 13, color: Color(0xFF888899)),
               ),
             ),
             const SizedBox(width: 6),
@@ -1086,11 +1966,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(LucideIcons.search, size: 12, color: Color(0xFF888899)),
+                    const Icon(LucideIcons.search,
+                        size: 12, color: Color(0xFF888899)),
                     const SizedBox(width: 6),
                     Text(
                       projectName,
-                      style: GoogleFonts.inter(color: const Color(0xFFCCCCDD), fontSize: 11),
+                      style: GoogleFonts.inter(
+                          color: const Color(0xFFCCCCDD), fontSize: 11),
                     ),
                   ],
                 ),
@@ -1110,10 +1992,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     style: GoogleFonts.inter(color: _G.textPri, fontSize: 12),
                     decoration: InputDecoration(
                       hintText: 'Search files…',
-                      hintStyle: GoogleFonts.inter(color: _G.textMuted, fontSize: 12),
+                      hintStyle:
+                          GoogleFonts.inter(color: _G.textMuted, fontSize: 12),
                       filled: true,
                       fillColor: _G.glass,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 10),
                       border: OutlineInputBorder(
                         borderSide: BorderSide(color: _G.border),
                         borderRadius: BorderRadius.circular(6),
@@ -1137,6 +2021,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             }),
           ),
           _topBarBtn(icon: LucideIcons.save, onTap: _saveCurrentFile),
+          if (_workspaceRoot != null)
+            _topBarBtn(
+              icon: LucideIcons.download,
+              onTap: _downloadWorkspace,
+            ),
+          if (_gitProject != null)
+            _topBarBtn(
+              icon: LucideIcons.uploadCloud,
+              onTap: _pushingToGitHub ? null : _pushCurrentFile,
+              active: _pushingToGitHub,
+            ),
           _topBarBtn(
             icon: LucideIcons.globe,
             onTap: _openInBrowser,
@@ -1205,7 +2100,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     );
   }
 
-  PopupMenuItem<String> _menuItem(String value, String text, {String? shortcut, IconData? icon, Color? color}) {
+  PopupMenuItem<String> _menuItem(String value, String text,
+      {String? shortcut, IconData? icon, Color? color}) {
     return PopupMenuItem<String>(
       value: value,
       height: 32,
@@ -1215,12 +2111,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             Icon(icon, size: 14, color: color ?? const Color(0xFFAAAAAA)),
             const SizedBox(width: 8),
           ],
-          Text(text, style: GoogleFonts.inter(fontSize: 12, color: color ?? Colors.white)),
+          Text(text,
+              style: GoogleFonts.inter(
+                  fontSize: 12, color: color ?? Colors.white)),
           const Spacer(),
           if (shortcut != null)
             Padding(
               padding: const EdgeInsets.only(left: 16),
-              child: Text(shortcut, style: GoogleFonts.inter(fontSize: 10.5, color: const Color(0xFF777788))),
+              child: Text(shortcut,
+                  style: GoogleFonts.inter(
+                      fontSize: 10.5, color: const Color(0xFF777788))),
             ),
         ],
       ),
@@ -1231,15 +2131,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     return _buildMenuBarItem(
       label: 'File',
       items: [
-        _menuItem('new_file', 'New File...', shortcut: 'Ctrl+N', icon: LucideIcons.filePlus),
-        _menuItem('new_folder', 'New Folder...', shortcut: 'Ctrl+Shift+N', icon: LucideIcons.folderPlus),
-        _menuItem('open_folder', 'Open Folder...', shortcut: 'Ctrl+O', icon: LucideIcons.folderOpen),
+        _menuItem('new_file', 'New File...',
+            shortcut: 'Ctrl+N', icon: LucideIcons.filePlus),
+        _menuItem('new_folder', 'New Folder...',
+            shortcut: 'Ctrl+Shift+N', icon: LucideIcons.folderPlus),
+        _menuItem('open_folder', 'Open Folder...',
+            shortcut: 'Ctrl+O', icon: LucideIcons.folderOpen),
         const PopupMenuDivider(height: 8),
         _menuItem('save', 'Save', shortcut: 'Ctrl+S', icon: LucideIcons.save),
         _menuItem('save_all', 'Save All', shortcut: 'Ctrl+K S'),
         const PopupMenuDivider(height: 8),
         _menuItem('refresh', 'Refresh Files', icon: LucideIcons.refreshCw),
-        _menuItem('close_tab', 'Close Tab', shortcut: 'Ctrl+W', icon: LucideIcons.x),
+        _menuItem('close_tab', 'Close Tab',
+            shortcut: 'Ctrl+W', icon: LucideIcons.x),
       ],
       onSelected: (val) {
         switch (val) {
@@ -1283,7 +2187,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         _menuItem('copy', 'Copy', shortcut: 'Ctrl+C'),
         _menuItem('paste', 'Paste', shortcut: 'Ctrl+V'),
         const PopupMenuDivider(height: 8),
-        _menuItem('find', 'Find...', shortcut: 'Ctrl+F', icon: LucideIcons.search),
+        _menuItem('find', 'Find...',
+            shortcut: 'Ctrl+F', icon: LucideIcons.search),
       ],
       onSelected: (val) {
         if (val == 'find') {
@@ -1308,14 +2213,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     return _buildMenuBarItem(
       label: 'View',
       items: [
-        _menuItem('toggle_explorer', 'Explorer', shortcut: 'Ctrl+Shift+E', icon: LucideIcons.files),
-        _menuItem('toggle_search', 'Search', shortcut: 'Ctrl+Shift+F', icon: LucideIcons.search),
-        _menuItem('toggle_terminal', 'Terminal', shortcut: 'Ctrl+`', icon: LucideIcons.terminal),
+        _menuItem('toggle_explorer', 'Explorer',
+            shortcut: 'Ctrl+Shift+E', icon: LucideIcons.files),
+        _menuItem('toggle_search', 'Search',
+            shortcut: 'Ctrl+Shift+F', icon: LucideIcons.search),
+        _menuItem('toggle_terminal', 'Terminal',
+            shortcut: 'Ctrl+`', icon: LucideIcons.terminal),
       ],
       onSelected: (val) {
         if (val == 'toggle_explorer') _toggleExplorer();
-        if (val == 'toggle_search') setState(() => _searchExpanded = !_searchExpanded);
-        if (val == 'toggle_terminal') setState(() => _terminalOpen = !_terminalOpen);
+        if (val == 'toggle_search')
+          setState(() => _searchExpanded = !_searchExpanded);
+        if (val == 'toggle_terminal')
+          setState(() => _terminalOpen = !_terminalOpen);
       },
     );
   }
@@ -1344,10 +2254,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     return _buildMenuBarItem(
       label: 'Run',
       items: [
-        _menuItem('start_run', 'Start Debugging / Run', shortcut: 'F5', icon: LucideIcons.play),
-        _menuItem('live_preview', 'Open Live Preview in Browser', shortcut: 'Alt+B', icon: LucideIcons.globe),
-        _menuItem('toggle_live_server', _liveServerService?.isRunning == true ? 'Stop Live Server' : 'Start Live Server', icon: LucideIcons.radio),
-        _menuItem('stop_run', 'Stop Execution', shortcut: 'Shift+F5', icon: LucideIcons.square),
+        _menuItem('start_run', 'Start Debugging / Run',
+            shortcut: 'F5', icon: LucideIcons.play),
+        _menuItem('live_preview', 'Open Live Preview in Browser',
+            shortcut: 'Alt+B', icon: LucideIcons.globe),
+        _menuItem(
+            'toggle_live_server',
+            _liveServerService?.isRunning == true
+                ? 'Stop Live Server'
+                : 'Start Live Server',
+            icon: LucideIcons.radio),
+        _menuItem('stop_run', 'Stop Execution',
+            shortcut: 'Shift+F5', icon: LucideIcons.square),
       ],
       onSelected: (val) {
         if (val == 'start_run') _runCode();
@@ -1362,12 +2280,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     return _buildMenuBarItem(
       label: 'Terminal',
       items: [
-        _menuItem('toggle_term', 'Toggle Terminal', shortcut: 'Ctrl+`', icon: LucideIcons.terminal),
-        _menuItem('clear_term', 'Clear Terminal', shortcut: 'Ctrl+K', icon: LucideIcons.trash2),
+        _menuItem('toggle_term', 'Toggle Terminal',
+            shortcut: 'Ctrl+`', icon: LucideIcons.terminal),
+        _menuItem('clear_term', 'Clear Terminal',
+            shortcut: 'Ctrl+K', icon: LucideIcons.trash2),
         _menuItem('status', 'Terminal Status', icon: LucideIcons.info),
       ],
       onSelected: (val) {
-        if (val == 'toggle_term') setState(() => _terminalOpen = !_terminalOpen);
+        if (val == 'toggle_term')
+          setState(() => _terminalOpen = !_terminalOpen);
         if (val == 'clear_term') setState(() => _termLogs.clear());
         if (val == 'status') _termSubmit('status');
       },
@@ -1378,7 +2299,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     return _buildMenuBarItem(
       label: 'Help',
       items: [
-        _menuItem('shortcuts', 'Keyboard Shortcuts', shortcut: 'Ctrl+K Ctrl+S', icon: LucideIcons.keyboard),
+        _menuItem('shortcuts', 'Keyboard Shortcuts',
+            shortcut: 'Ctrl+K Ctrl+S', icon: LucideIcons.keyboard),
         _menuItem('about', 'About Bug Workspace', icon: LucideIcons.info),
       ],
       onSelected: (val) {
@@ -1406,9 +2328,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         ),
         title: Row(
           children: [
-            const Icon(LucideIcons.keyboard, size: 20, color: Color(0xFF54C5F8)),
+            const Icon(LucideIcons.keyboard,
+                size: 20, color: Color(0xFF54C5F8)),
             const SizedBox(width: 10),
-            Text('Keyboard Shortcuts', style: GoogleFonts.inter(color: Colors.white, fontSize: 16)),
+            Text('Keyboard Shortcuts',
+                style: GoogleFonts.inter(color: Colors.white, fontSize: 16)),
           ],
         ),
         content: SizedBox(
@@ -1433,7 +2357,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close', style: TextStyle(color: Color(0xFF54C5F8))),
+            child:
+                const Text('Close', style: TextStyle(color: Color(0xFF54C5F8))),
           ),
         ],
       ),
@@ -1446,7 +2371,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: GoogleFonts.inter(color: const Color(0xFFCCCCDD), fontSize: 13)),
+          Text(label,
+              style: GoogleFonts.inter(
+                  color: const Color(0xFFCCCCDD), fontSize: 13)),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
@@ -1456,7 +2383,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             ),
             child: Text(
               key,
-              style: GoogleFonts.jetBrainsMono(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
+              style: GoogleFonts.jetBrainsMono(
+                  color: Colors.white,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -1477,12 +2407,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           children: [
             const Icon(LucideIcons.code2, size: 22, color: Color(0xFF54C5F8)),
             const SizedBox(width: 10),
-            Text('Bug Workspace', style: GoogleFonts.inter(color: Colors.white, fontSize: 16)),
+            Text('Bug Workspace',
+                style: GoogleFonts.inter(color: Colors.white, fontSize: 16)),
           ],
         ),
         content: Text(
           'A cross-platform coding workspace designed for students and developers.\nVersion 1.0.0 (Bug Engine)',
-          style: GoogleFonts.inter(color: const Color(0xFF888899), fontSize: 13, height: 1.5),
+          style: GoogleFonts.inter(
+              color: const Color(0xFF888899), fontSize: 13, height: 1.5),
         ),
         actions: [
           TextButton(
@@ -1494,7 +2426,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     );
   }
 
-  Widget _topBarBtn({required IconData icon, VoidCallback? onTap, bool active = false}) {
+  Widget _topBarBtn(
+      {required IconData icon, VoidCallback? onTap, bool active = false}) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -1513,12 +2446,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   // ═══════════════════════════════════════════════════════════════════════════
   Widget _buildLeftRail() {
     final items = [
-      (LucideIcons.files,     0),
-      (LucideIcons.bot,       6),
-      (LucideIcons.search,    1),
+      (LucideIcons.files, 0),
+      (LucideIcons.bot, 6),
+      (LucideIcons.search, 1),
       (LucideIcons.gitBranch, 2),
-      (LucideIcons.play,      3),
-      (LucideIcons.blocks,    4),
+      (LucideIcons.play, 3),
+      (LucideIcons.blocks, 4),
     ];
     return Container(
       width: 44,
@@ -1562,7 +2495,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         decoration: BoxDecoration(
           color: isAi && active ? const Color(0xFF1E293B) : Colors.transparent,
           border: active
-              ? Border(left: BorderSide(color: isAi ? const Color(0xFF38BDF8) : _G.textPri, width: 2))
+              ? Border(
+                  left: BorderSide(
+                      color: isAi ? const Color(0xFF38BDF8) : _G.textPri,
+                      width: 2))
               : null,
         ),
         child: Center(
@@ -1607,7 +2543,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   //  WORKSPACE AI CHAT DRAWER (Zero-Cost Remote Terminal AI Bridge)
   // ═══════════════════════════════════════════════════════════════════════════
   Widget _buildAiChatDrawer(double drawerW) {
-    final activeFilename = _activeFile.isEmpty ? 'No file selected' : _activeFile;
+    final activeFilename =
+        _activeFile.isEmpty ? 'No file selected' : _activeFile;
     return Container(
       width: drawerW,
       decoration: BoxDecoration(
@@ -1632,7 +2569,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     color: const Color(0xFF38BDF8).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const Icon(LucideIcons.bot, size: 14, color: Color(0xFF38BDF8)),
+                  child: const Icon(LucideIcons.bot,
+                      size: 14, color: Color(0xFF38BDF8)),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1676,7 +2614,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 GestureDetector(
                   onTap: _showWorkspaceModelPicker,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E2433),
                       borderRadius: BorderRadius.circular(6),
@@ -1694,7 +2633,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                           ),
                         ),
                         const SizedBox(width: 3),
-                        const Icon(LucideIcons.chevronDown, size: 11, color: Color(0xFF7DD3FC)),
+                        const Icon(LucideIcons.chevronDown,
+                            size: 11, color: Color(0xFF7DD3FC)),
                       ],
                     ),
                   ),
@@ -1705,7 +2645,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   onTap: _toggleExplorer,
                   child: const Padding(
                     padding: EdgeInsets.all(4),
-                    child: Icon(LucideIcons.x, size: 14, color: Color(0xFF94A3B8)),
+                    child:
+                        Icon(LucideIcons.x, size: 14, color: Color(0xFF94A3B8)),
                   ),
                 ),
               ],
@@ -1718,7 +2659,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             color: const Color(0xFF0F121C),
             child: Row(
               children: [
-                const Icon(LucideIcons.fileCode2, size: 12, color: Color(0xFF38BDF8)),
+                const Icon(LucideIcons.fileCode2,
+                    size: 12, color: Color(0xFF38BDF8)),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -1741,10 +2683,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                         _workspaceAiMessages.add(
                           ChatMessage(
                             id: 'ws_ai_welcome',
-                            text: '⚡ [Remote Terminal AI Connected]\nEngine: $_workspaceAiModel\nReady to analyze $_activeFile or run terminal commands.',
+                            text:
+                                '⚡ [Remote Terminal AI Connected]\nEngine: $_workspaceAiModel\nReady to analyze $_activeFile or run terminal commands.',
                             isMe: false,
                             time: 'Now',
-                            codeSnippet: '// Tap [⚡ Apply to Editor] on any code snippet to update your file instantly!',
+                            codeSnippet:
+                                '// Tap [⚡ Apply to Editor] on any code snippet to update your file instantly!',
                             codeLang: _lang,
                             isDelivered: true,
                           ),
@@ -1753,7 +2697,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     },
                     child: const Padding(
                       padding: EdgeInsets.all(2),
-                      child: Icon(LucideIcons.trash2, size: 13, color: Color(0xFF64748B)),
+                      child: Icon(LucideIcons.trash2,
+                          size: 13, color: Color(0xFF64748B)),
                     ),
                   ),
                 ),
@@ -1775,7 +2720,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 const SizedBox(width: 6),
                 _buildWorkspacePromptChip('⚡ Optimize', LucideIcons.zap),
                 const SizedBox(width: 6),
-                _buildWorkspacePromptChip('🧪 Add tests', LucideIcons.checkCheck),
+                _buildWorkspacePromptChip(
+                    '🧪 Add tests', LucideIcons.checkCheck),
                 const SizedBox(width: 6),
                 _buildWorkspacePromptChip('▶ Run cmd', LucideIcons.terminal),
               ],
@@ -1789,11 +2735,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             child: ListView.builder(
               controller: _workspaceAiScroll,
               padding: const EdgeInsets.all(10),
-              itemCount: _workspaceAiMessages.length + (_workspaceAiThinking ? 1 : 0),
+              itemCount:
+                  _workspaceAiMessages.length + (_workspaceAiThinking ? 1 : 0),
               itemBuilder: (ctx, i) {
                 if (i == _workspaceAiMessages.length) {
                   return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     margin: const EdgeInsets.only(bottom: 8),
                     decoration: BoxDecoration(
                       color: const Color(0xFF131722),
@@ -1806,7 +2754,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                         const SizedBox(
                           width: 12,
                           height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF38BDF8)),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 1.5, color: Color(0xFF38BDF8)),
                         ),
                         const SizedBox(width: 8),
                         Text(
@@ -1842,7 +2791,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   children: [
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: const Color(0xFF0A0C13),
                           borderRadius: BorderRadius.circular(10),
@@ -1852,13 +2802,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                           controller: _workspaceAiCtrl,
                           minLines: 1,
                           maxLines: 4,
-                          style: GoogleFonts.inter(color: Colors.white, fontSize: 12),
+                          style: GoogleFonts.inter(
+                              color: Colors.white, fontSize: 12),
                           decoration: InputDecoration(
                             hintText: 'Ask to edit, fix, or run code…',
-                            hintStyle: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 11),
+                            hintStyle: GoogleFonts.inter(
+                                color: const Color(0xFF64748B), fontSize: 11),
                             border: InputBorder.none,
                             isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 6),
                           ),
                           onSubmitted: (val) => _sendWorkspaceAiMessage(val),
                         ),
@@ -1874,7 +2827,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                           color: const Color(0xFF38BDF8),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(LucideIcons.send, size: 15, color: Color(0xFF0B1120)),
+                        child: const Icon(LucideIcons.send,
+                            size: 15, color: Color(0xFF0B1120)),
                       ),
                     ),
                   ],
@@ -1929,7 +2883,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
-        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment:
+            isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           // Bubble
           Container(
@@ -1949,7 +2904,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(LucideIcons.bot, size: 12, color: Color(0xFF38BDF8)),
+                      const Icon(LucideIcons.bot,
+                          size: 12, color: Color(0xFF38BDF8)),
                       const SizedBox(width: 4),
                       Text(
                         _workspaceAiModel,
@@ -1989,10 +2945,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 children: [
                   // Code header
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: const BoxDecoration(
                       color: Color(0xFF0F172A),
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(7)),
                     ),
                     child: Row(
                       children: [
@@ -2007,15 +2965,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                         const Spacer(),
                         GestureDetector(
                           onTap: () {
-                            Clipboard.setData(ClipboardData(text: m.codeSnippet!));
+                            Clipboard.setData(
+                                ClipboardData(text: m.codeSnippet!));
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Code snippet copied to clipboard!'),
+                                content:
+                                    Text('Code snippet copied to clipboard!'),
                                 duration: Duration(seconds: 1),
                               ),
                             );
                           },
-                          child: const Icon(LucideIcons.copy, size: 12, color: Color(0xFF94A3B8)),
+                          child: const Icon(LucideIcons.copy,
+                              size: 12, color: Color(0xFF94A3B8)),
                         ),
                       ],
                     ),
@@ -2034,10 +2995,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   ),
                   // Action buttons bar
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                     decoration: const BoxDecoration(
                       color: Color(0xFF0F172A),
-                      borderRadius: BorderRadius.vertical(bottom: Radius.circular(7)),
+                      borderRadius:
+                          BorderRadius.vertical(bottom: Radius.circular(7)),
                     ),
                     child: Row(
                       children: [
@@ -2045,16 +3008,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                         GestureDetector(
                           onTap: () => _applyCodeToActiveFile(m.codeSnippet!),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 3),
                             decoration: BoxDecoration(
                               color: const Color(0xFF10B981).withOpacity(0.15),
                               borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFF10B981)),
+                              border:
+                                  Border.all(color: const Color(0xFF10B981)),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(LucideIcons.zap, size: 11, color: Color(0xFF10B981)),
+                                const Icon(LucideIcons.zap,
+                                    size: 11, color: Color(0xFF10B981)),
                                 const SizedBox(width: 4),
                                 Text(
                                   'Apply to Editor',
@@ -2073,16 +3039,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                         GestureDetector(
                           onTap: () => _runCodeInTerminal(m.codeSnippet!),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 3),
                             decoration: BoxDecoration(
                               color: const Color(0xFF38BDF8).withOpacity(0.15),
                               borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFF38BDF8)),
+                              border:
+                                  Border.all(color: const Color(0xFF38BDF8)),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(LucideIcons.play, size: 11, color: Color(0xFF38BDF8)),
+                                const Icon(LucideIcons.play,
+                                    size: 11, color: Color(0xFF38BDF8)),
                                 const SizedBox(width: 4),
                                 Text(
                                   'Run in Terminal',
@@ -2199,27 +3168,35 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   final selected = _workspaceAiModel == m.$1;
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    tileColor: selected ? const Color(0xFF1E293B) : Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    tileColor:
+                        selected ? const Color(0xFF1E293B) : Colors.transparent,
                     leading: Icon(
                       LucideIcons.bot,
-                      color: selected ? const Color(0xFF38BDF8) : const Color(0xFF94A3B8),
+                      color: selected
+                          ? const Color(0xFF38BDF8)
+                          : const Color(0xFF94A3B8),
                       size: 20,
                     ),
                     title: Text(
                       m.$1,
                       style: GoogleFonts.inter(
-                        color: selected ? const Color(0xFF38BDF8) : Colors.white,
-                        fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                        color:
+                            selected ? const Color(0xFF38BDF8) : Colors.white,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.w400,
                         fontSize: 13,
                       ),
                     ),
                     subtitle: Text(
                       m.$2,
-                      style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 11),
+                      style: GoogleFonts.inter(
+                          color: const Color(0xFF64748B), fontSize: 11),
                     ),
                     trailing: selected
-                        ? const Icon(LucideIcons.check, size: 16, color: Color(0xFF38BDF8))
+                        ? const Icon(LucideIcons.check,
+                            size: 16, color: Color(0xFF38BDF8))
                         : null,
                     onTap: () {
                       setState(() => _workspaceAiModel = m.$1);
@@ -2269,23 +3246,32 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           '• Structure: Contains logic and component declarations tailored for this module.';
       snippet = code.isNotEmpty ? code : '// No code currently in $filename';
     } else if (q.contains('fix') || q.contains('bug')) {
-      answerText = 'Identified potential edge cases and applied modern formatting and safe null handling for `$filename`.';
+      answerText =
+          'Identified potential edge cases and applied modern formatting and safe null handling for `$filename`.';
       snippet = code.isNotEmpty
           ? '// Fixed & verified by $_workspaceAiModel\n$code'
           : '// Clean template for $filename\nvoid main() {\n  print("Ready");\n}';
     } else if (q.contains('optimiz')) {
-      answerText = 'Refactored `$filename` to reduce redundant computations and improve maintainability.';
+      answerText =
+          'Refactored `$filename` to reduce redundant computations and improve maintainability.';
       snippet = code.isNotEmpty
           ? '// Optimized version of $filename\n$code'
           : '// High-performance template\nvoid main() {\n  // Optimized logic\n}';
     } else if (q.contains('test')) {
-      answerText = 'Generated comprehensive unit test suite covering key assertions for `$filename`:';
-      snippet = 'import \'package:flutter_test/flutter_test.dart\';\n\nvoid main() {\n  test(\'$filename smoke test\', () {\n    expect(true, isTrue);\n  });\n}';
-    } else if (q.contains('terminal') || q.contains('cmd') || q.contains('run')) {
+      answerText =
+          'Generated comprehensive unit test suite covering key assertions for `$filename`:';
+      snippet =
+          'import \'package:flutter_test/flutter_test.dart\';\n\nvoid main() {\n  test(\'$filename smoke test\', () {\n    expect(true, isTrue);\n  });\n}';
+    } else if (q.contains('terminal') ||
+        q.contains('cmd') ||
+        q.contains('run')) {
       answerText = 'Generated executable terminal command for this project:';
-      snippet = lang == 'dart' ? 'flutter test' : (lang == 'python' ? 'python "$filename"' : 'npm test');
+      snippet = lang == 'dart'
+          ? 'flutter test'
+          : (lang == 'python' ? 'python "$filename"' : 'npm test');
     } else {
-      answerText = 'Here is the solution generated for: "$query"\nContext: `$filename`';
+      answerText =
+          'Here is the solution generated for: "$query"\nContext: `$filename`';
       snippet = code.isNotEmpty
           ? '// Updated logic for: $query\n$code'
           : '// Code generated by $_workspaceAiModel\nvoid main() {\n  print("Executed for: $query");\n}';
@@ -2321,15 +3307,38 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
 
     _scrollAiChatToBottom();
 
-    Future.delayed(const Duration(milliseconds: 700), () {
-      if (!mounted) return;
-      final response = _generateAiResponse(text);
-      setState(() {
-        _workspaceAiMessages.add(response);
-        _workspaceAiThinking = false;
-      });
+    () async {
+      try {
+        final workspaceContext = _activeFile.isEmpty
+            ? null
+            : 'File: $_activeFile\nLanguage: $_lang\nContent:\n$_activeCode';
+        final reply = await AiChatService.send(
+          message: text,
+          threadId: _workspaceAiThreadId,
+          workspaceContext: workspaceContext,
+        );
+        if (!mounted) return;
+        setState(() {
+          _workspaceAiThreadId = reply.threadId;
+          _workspaceAiMessages.add(ChatMessage(
+            id: reply.responseId ??
+                'ws_ai_${DateTime.now().microsecondsSinceEpoch}',
+            text: reply.text,
+            isMe: false,
+            time: 'Just now',
+            isDelivered: true,
+          ));
+          _workspaceAiThinking = false;
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() => _workspaceAiThinking = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('AI request failed: $error')),
+        );
+      }
       _scrollAiChatToBottom();
-    });
+    }();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2347,7 +3356,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         children: [
           // Header row
           Padding(
-            padding: const EdgeInsets.fromLTRB(_G.sp * 1.5, _G.sp, _G.sp, _G.sp),
+            padding:
+                const EdgeInsets.fromLTRB(_G.sp * 1.5, _G.sp, _G.sp, _G.sp),
             child: Row(
               children: [
                 GestureDetector(
@@ -2374,7 +3384,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     onTap: _showOpenFolderDialog,
                     child: const Padding(
                       padding: EdgeInsets.all(4),
-                      child: Icon(LucideIcons.folderOpen, size: 14, color: _G.textMuted),
+                      child: Icon(LucideIcons.folderOpen,
+                          size: 14, color: _G.textMuted),
                     ),
                   ),
                 ),
@@ -2386,7 +3397,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     onTap: () => _startInlineCreation(isFolder: false),
                     child: const Padding(
                       padding: EdgeInsets.all(4),
-                      child: Icon(LucideIcons.filePlus, size: 14, color: _G.textMuted),
+                      child: Icon(LucideIcons.filePlus,
+                          size: 14, color: _G.textMuted),
                     ),
                   ),
                 ),
@@ -2398,7 +3410,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     onTap: () => _startInlineCreation(isFolder: true),
                     child: const Padding(
                       padding: EdgeInsets.all(4),
-                      child: Icon(LucideIcons.folderPlus, size: 14, color: _G.textMuted),
+                      child: Icon(LucideIcons.folderPlus,
+                          size: 14, color: _G.textMuted),
                     ),
                   ),
                 ),
@@ -2410,7 +3423,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     onTap: _refreshTree,
                     child: const Padding(
                       padding: EdgeInsets.all(4),
-                      child: Icon(LucideIcons.refreshCw, size: 14, color: _G.textMuted),
+                      child: Icon(LucideIcons.refreshCw,
+                          size: 14, color: _G.textMuted),
                     ),
                   ),
                 ),
@@ -2422,13 +3436,61 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     onTap: () => _collapseAllFolders(_tree),
                     child: const Padding(
                       padding: EdgeInsets.all(4),
-                      child: Icon(LucideIcons.chevronsDownUp, size: 14, color: _G.textMuted),
+                      child: Icon(LucideIcons.chevronsDownUp,
+                          size: 14, color: _G.textMuted),
                     ),
                   ),
                 ),
               ],
             ),
           ),
+
+          if (_recentProjects.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 8, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'RECENT',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  ..._recentProjects.map(
+                    (project) => InkWell(
+                      onTap: () => widget.onOpenRecentProject(project.id),
+                      borderRadius: BorderRadius.circular(7),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 5),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.gitBranch,
+                                size: 12, color: Color(0xFF54C5F8)),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                project.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Colors.white60, fontSize: 10.5),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Divider(color: Color(0x1FFFFFFF), height: 12),
+                ],
+              ),
+            ),
 
           // Workspace root path label (clickable to clear folder selection)
           if (_workspaceRoot != null)
@@ -2438,18 +3500,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 setState(() => _selectedFolderPath = null);
               },
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(_G.sp * 1.5, 0, _G.sp, _G.sp),
+                padding:
+                    const EdgeInsets.fromLTRB(_G.sp * 1.5, 0, _G.sp, _G.sp),
                 child: Row(
                   children: [
                     Icon(
-                      _selectedFolderPath == null ? LucideIcons.folderOpen : LucideIcons.folder,
+                      _selectedFolderPath == null
+                          ? LucideIcons.folderOpen
+                          : LucideIcons.folder,
                       size: 13,
                       color: const Color(0xFFCCA352),
                     ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        _workspaceRoot!.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).last,
+                        _workspaceRoot!
+                            .split(RegExp(r'[\\/]'))
+                            .where((s) => s.isNotEmpty)
+                            .last,
                         style: GoogleFonts.inter(
                           color: _G.textPri,
                           fontSize: 11.5,
@@ -2470,12 +3538,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(LucideIcons.folderOpen, size: 28, color: _G.textMuted),
+                        const Icon(LucideIcons.folderOpen,
+                            size: 28, color: _G.textMuted),
                         const SizedBox(height: 8),
                         Text(
                           'Empty workspace\nTap + to create a file',
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.inter(color: _G.textMuted, fontSize: 12),
+                          style: GoogleFonts.inter(
+                              color: _G.textMuted, fontSize: 12),
                         ),
                       ],
                     ),
@@ -2493,7 +3563,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                       children: [
                         // Inline input at root level if active and no folder selected
                         if (_inlineCreating &&
-                            (_inlineParentPath == null || _inlineParentPath == _workspaceRoot))
+                            (_inlineParentPath == null ||
+                                _inlineParentPath == _workspaceRoot))
                           _buildInlineInputNode(0),
                         ..._filteredTree(_tree, _searchQuery)
                             .map((node) => _buildTreeNode(node, 0)),
@@ -2518,7 +3589,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           Icon(
             _inlineIsFolder ? LucideIcons.folder : LucideIcons.fileCode,
             size: 13,
-            color: _inlineIsFolder ? const Color(0xFFCCA352) : const Color(0xFF54C5F8),
+            color: _inlineIsFolder
+                ? const Color(0xFFCCA352)
+                : const Color(0xFF54C5F8),
           ),
           const SizedBox(width: 6),
           Expanded(
@@ -2542,15 +3615,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   fontWeight: FontWeight.w400,
                 ),
                 decoration: InputDecoration(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   isDense: true,
                   filled: false,
                   fillColor: Colors.transparent,
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  hintText: _inlineIsFolder ? 'Folder name...' : 'File name (e.g. main.js)...',
-                  hintStyle: const TextStyle(color: Color(0xFF666677), fontSize: 11),
+                  hintText: _inlineIsFolder
+                      ? 'Folder name...'
+                      : 'File name (e.g. main.js)...',
+                  hintStyle:
+                      const TextStyle(color: Color(0xFF666677), fontSize: 11),
                 ),
                 onSubmitted: _commitInlineCreation,
                 onTapOutside: (_) {
@@ -2609,13 +3686,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             height: 28,
             color: isActive
                 ? _G.glass
-                : (isFolderSelected ? const Color(0x1FFFFFFF) : Colors.transparent),
+                : (isFolderSelected
+                    ? const Color(0x1FFFFFFF)
+                    : Colors.transparent),
             padding: EdgeInsets.only(left: indent),
             child: Row(
               children: [
                 if (node.isFolder) ...[
                   Icon(
-                    node.expanded ? LucideIcons.chevronDown : LucideIcons.chevronRight,
+                    node.expanded
+                        ? LucideIcons.chevronDown
+                        : LucideIcons.chevronRight,
                     size: 13,
                     color: _G.textMuted,
                   ),
@@ -2686,8 +3767,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             const SizedBox(height: 12),
             if (node.isFolder) ...[
               ListTile(
-                leading: const Icon(LucideIcons.filePlus, color: Color(0xFF54C5F8), size: 18),
-                title: Text('New File in this folder', style: GoogleFonts.inter(color: _G.textPri)),
+                leading: const Icon(LucideIcons.filePlus,
+                    color: Color(0xFF54C5F8), size: 18),
+                title: Text('New File in this folder',
+                    style: GoogleFonts.inter(color: _G.textPri)),
                 onTap: () {
                   Navigator.pop(ctx);
                   setState(() => _selectedFolderPath = node.path);
@@ -2695,8 +3778,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 },
               ),
               ListTile(
-                leading: const Icon(LucideIcons.folderPlus, color: Color(0xFFCCA352), size: 18),
-                title: Text('New Folder in this folder', style: GoogleFonts.inter(color: _G.textPri)),
+                leading: const Icon(LucideIcons.folderPlus,
+                    color: Color(0xFFCCA352), size: 18),
+                title: Text('New Folder in this folder',
+                    style: GoogleFonts.inter(color: _G.textPri)),
                 onTap: () {
                   Navigator.pop(ctx);
                   setState(() => _selectedFolderPath = node.path);
@@ -2705,16 +3790,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               ),
             ],
             ListTile(
-              leading: const Icon(LucideIcons.pencil, color: _G.textSec, size: 18),
-              title: Text('Rename', style: GoogleFonts.inter(color: _G.textPri)),
+              leading:
+                  const Icon(LucideIcons.pencil, color: _G.textSec, size: 18),
+              title:
+                  Text('Rename', style: GoogleFonts.inter(color: _G.textPri)),
               onTap: () {
                 Navigator.pop(ctx);
                 _showRenameDialog(node);
               },
             ),
             ListTile(
-              leading: const Icon(LucideIcons.trash2, color: Colors.redAccent, size: 18),
-              title: Text('Delete', style: GoogleFonts.inter(color: Colors.redAccent)),
+              leading: const Icon(LucideIcons.trash2,
+                  color: Colors.redAccent, size: 18),
+              title: Text('Delete',
+                  style: GoogleFonts.inter(color: Colors.redAccent)),
               onTap: () {
                 Navigator.pop(ctx);
                 _confirmDelete(node);
@@ -2731,21 +3820,29 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
     IconData icon;
     Color color;
     if (name.endsWith('.dart')) {
-      icon = LucideIcons.fileCode2; color = const Color(0xFF54C5F8);
+      icon = LucideIcons.fileCode2;
+      color = const Color(0xFF54C5F8);
     } else if (name.endsWith('.html')) {
-      icon = LucideIcons.fileCode; color = const Color(0xFFE44D26);
+      icon = LucideIcons.fileCode;
+      color = const Color(0xFFE44D26);
     } else if (name.endsWith('.py')) {
-      icon = LucideIcons.fileCode; color = const Color(0xFF3572A5);
+      icon = LucideIcons.fileCode;
+      color = const Color(0xFF3572A5);
     } else if (name.endsWith('.css')) {
-      icon = LucideIcons.fileCode; color = const Color(0xFF563D7C);
+      icon = LucideIcons.fileCode;
+      color = const Color(0xFF563D7C);
     } else if (name.endsWith('.js')) {
-      icon = LucideIcons.fileCode; color = const Color(0xFFF7DF1E);
+      icon = LucideIcons.fileCode;
+      color = const Color(0xFFF7DF1E);
     } else if (name.endsWith('.md')) {
-      icon = LucideIcons.fileText; color = const Color(0xFF88AACC);
+      icon = LucideIcons.fileText;
+      color = const Color(0xFF88AACC);
     } else if (name.endsWith('.json')) {
-      icon = LucideIcons.fileText; color = const Color(0xFFD19A66);
+      icon = LucideIcons.fileText;
+      color = const Color(0xFFD19A66);
     } else {
-      icon = LucideIcons.fileText; color = _G.textMuted;
+      icon = LucideIcons.fileText;
+      color = _G.textMuted;
     }
     return Icon(icon, size: size, color: color);
   }
@@ -2785,7 +3882,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                 'Open a file from the explorer\nto start coding',
                                 textAlign: TextAlign.center,
                                 style: GoogleFonts.inter(
-                                  color: _G.textMuted, fontSize: 13),
+                                    color: _G.textMuted, fontSize: 13),
                               ),
                             ],
                           ),
@@ -2823,7 +3920,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       return const SizedBox.shrink();
     }
 
-    if (_activeFile.isNotEmpty && !_openTabs.any((t) => t.path == _activePath)) {
+    if (_activeFile.isNotEmpty &&
+        !_openTabs.any((t) => t.path == _activePath)) {
       _openTabs.add(_EditorTab(name: _activeFile, path: _activePath));
     }
 
@@ -2854,12 +3952,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
-                          color: isActive ? const Color(0xFF09090B) : const Color(0xFF141416),
+                          color: isActive
+                              ? const Color(0xFF09090B)
+                              : const Color(0xFF141416),
                           border: Border(
                             top: isActive
-                                ? const BorderSide(color: Color(0xFF54C5F8), width: 2)
+                                ? const BorderSide(
+                                    color: Color(0xFF54C5F8), width: 2)
                                 : BorderSide.none,
-                            right: const BorderSide(color: Color(0x14FFFFFF), width: 1),
+                            right: const BorderSide(
+                                color: Color(0x14FFFFFF), width: 1),
                           ),
                         ),
                         child: Row(
@@ -2870,9 +3972,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                             Text(
                               tab.name,
                               style: GoogleFonts.inter(
-                                color: isActive ? Colors.white : const Color(0xFF888899),
+                                color: isActive
+                                    ? Colors.white
+                                    : const Color(0xFF888899),
                                 fontSize: 12,
-                                fontWeight: isActive ? FontWeight.w500 : FontWeight.w400,
+                                fontWeight: isActive
+                                    ? FontWeight.w500
+                                    : FontWeight.w400,
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -2894,7 +4000,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                                 child: Icon(
                                   LucideIcons.x,
                                   size: 13,
-                                  color: isActive ? const Color(0xFFAAAAAA) : const Color(0xFF555566),
+                                  color: isActive
+                                      ? const Color(0xFFAAAAAA)
+                                      : const Color(0xFF555566),
                                 ),
                               ),
                             ),
@@ -2962,7 +4070,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   onTap: () => _showCreateDialog(isFolder: false),
                   child: const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 6),
-                    child: Icon(LucideIcons.plus, size: 15, color: Color(0xFF888899)),
+                    child: Icon(LucideIcons.plus,
+                        size: 15, color: Color(0xFF888899)),
                   ),
                 ),
               // More tab options
@@ -2995,15 +4104,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                 },
                 itemBuilder: (context) => [
                   if (hidePlusBtn)
-                    _menuItem('new_file', 'New File...', icon: LucideIcons.plus),
-                  _menuItem('open_browser', 'Open in Browser', icon: LucideIcons.globe),
-                  _menuItem('live_server', _liveServerService?.isRunning == true ? 'Stop Live Server' : 'Start Live Server', icon: LucideIcons.radio),
-                  _menuItem('save_all', 'Save All', shortcut: 'Ctrl+K S', icon: LucideIcons.save),
+                    _menuItem('new_file', 'New File...',
+                        icon: LucideIcons.plus),
+                  _menuItem('open_browser', 'Open in Browser',
+                      icon: LucideIcons.globe),
+                  _menuItem(
+                      'live_server',
+                      _liveServerService?.isRunning == true
+                          ? 'Stop Live Server'
+                          : 'Start Live Server',
+                      icon: LucideIcons.radio),
+                  _menuItem('save_all', 'Save All',
+                      shortcut: 'Ctrl+K S', icon: LucideIcons.save),
                   _menuItem('close_all', 'Close All Tabs', icon: LucideIcons.x),
                 ],
                 child: const Padding(
                   padding: EdgeInsets.only(left: 4, right: 8),
-                  child: Icon(LucideIcons.moreHorizontal, size: 15, color: Color(0xFF888899)),
+                  child: Icon(LucideIcons.moreHorizontal,
+                      size: 15, color: Color(0xFF888899)),
                 ),
               ),
             ],
@@ -3025,10 +4143,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
         rel = rel.substring(1);
       }
     }
-    final segments = rel.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).toList();
+    final segments =
+        rel.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).toList();
     if (segments.isEmpty) segments.add(_activeFile);
 
-    final parts = root.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).toList();
+    final parts =
+        root.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).toList();
     final projectName = parts.isNotEmpty ? parts.last : 'codesnap';
 
     return Container(
@@ -3046,24 +4166,31 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           children: [
             Text(
               projectName,
-              style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF777788)),
+              style: GoogleFonts.inter(
+                  fontSize: 11, color: const Color(0xFF777788)),
             ),
             for (int i = 0; i < segments.length; i++) ...[
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Icon(LucideIcons.chevronRight, size: 10, color: Color(0xFF555566)),
+                child: Icon(LucideIcons.chevronRight,
+                    size: 10, color: Color(0xFF555566)),
               ),
               if (i == segments.length - 1)
                 _fileIcon(segments[i], size: 11)
               else
-                const Icon(LucideIcons.folder, size: 11, color: Color(0xFF777799)),
+                const Icon(LucideIcons.folder,
+                    size: 11, color: Color(0xFF777799)),
               const SizedBox(width: 4),
               Text(
                 segments[i],
                 style: GoogleFonts.inter(
                   fontSize: 11,
-                  color: i == segments.length - 1 ? const Color(0xFFCCCCCC) : const Color(0xFF777788),
-                  fontWeight: i == segments.length - 1 ? FontWeight.w500 : FontWeight.w400,
+                  color: i == segments.length - 1
+                      ? const Color(0xFFCCCCCC)
+                      : const Color(0xFF777788),
+                  fontWeight: i == segments.length - 1
+                      ? FontWeight.w500
+                      : FontWeight.w400,
                 ),
               ),
             ],
@@ -3076,7 +4203,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   // ── Floating Run Button ───────────────────────────────────────────────────
   Widget _buildRunBtn() {
     final lower = _activePath.toLowerCase();
-    final isWeb = lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.css');
+    final isWeb = lower.endsWith('.html') ||
+        lower.endsWith('.htm') ||
+        lower.endsWith('.css');
     final isRunning = _terminalService?.isRunning == true;
 
     return Tooltip(
@@ -3117,7 +4246,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                constraints: const BoxConstraints(maxWidth: 650, maxHeight: 500),
+                constraints:
+                    const BoxConstraints(maxWidth: 650, maxHeight: 500),
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: const Color(0x0FFFFFFF),
@@ -3129,12 +4259,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                         borderRadius: BorderRadius.circular(6),
                         child: Image.memory(_activeImageBytes!),
                       )
-                    : const Icon(LucideIcons.image, size: 64, color: _G.textMuted),
+                    : const Icon(LucideIcons.image,
+                        size: 64, color: _G.textMuted),
               ),
               const SizedBox(height: 12),
               Text(
                 _activeFile,
-                style: GoogleFonts.jetBrainsMono(color: const Color(0xFFCCCCCC), fontSize: 12),
+                style: GoogleFonts.jetBrainsMono(
+                    color: const Color(0xFFCCCCCC), fontSize: 12),
               ),
             ],
           ),
@@ -3151,12 +4283,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             const SizedBox(height: 12),
             Text(
               'Binary file: $_activeFile',
-              style: GoogleFonts.inter(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+              style: GoogleFonts.inter(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             Text(
               'This file cannot be displayed or edited as text.',
-              style: GoogleFonts.inter(color: const Color(0xFF888899), fontSize: 12),
+              style: GoogleFonts.inter(
+                  color: const Color(0xFF888899), fontSize: 12),
             ),
           ],
         ),
@@ -3202,7 +4338,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     }),
                     child: const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 6),
-                      child: Icon(LucideIcons.square, size: 14, color: Colors.redAccent),
+                      child: Icon(LucideIcons.square,
+                          size: 14, color: Colors.redAccent),
                     ),
                   ),
                 // Clear logs
@@ -3210,7 +4347,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   onTap: () => setState(() => _termLogs.clear()),
                   child: const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 6),
-                    child: Icon(LucideIcons.trash2, size: 14, color: _G.textMuted),
+                    child:
+                        Icon(LucideIcons.trash2, size: 14, color: _G.textMuted),
                   ),
                 ),
                 // Close
@@ -3218,7 +4356,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   onTap: () => setState(() => _terminalOpen = false),
                   child: const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 6),
-                    child: Icon(LucideIcons.chevronDown, size: 16, color: _G.textMuted),
+                    child: Icon(LucideIcons.chevronDown,
+                        size: 16, color: _G.textMuted),
                   ),
                 ),
               ],
@@ -3236,15 +4375,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyC) {
                     if (isShift) {
                       // Ctrl + Shift + C: copy selected text
-                      if (_termCtrl.selection.isValid && !_termCtrl.selection.isCollapsed) {
-                        final sel = _termCtrl.text.substring(_termCtrl.selection.start, _termCtrl.selection.end);
+                      if (_termCtrl.selection.isValid &&
+                          !_termCtrl.selection.isCollapsed) {
+                        final sel = _termCtrl.text.substring(
+                            _termCtrl.selection.start, _termCtrl.selection.end);
                         Clipboard.setData(ClipboardData(text: sel));
                       }
                       return KeyEventResult.handled;
                     } else {
                       // Ctrl + C (no shift):
                       // If text is highlighted, let native copy work
-                      if (_termCtrl.selection.isValid && !_termCtrl.selection.isCollapsed) {
+                      if (_termCtrl.selection.isValid &&
+                          !_termCtrl.selection.isCollapsed) {
                         return KeyEventResult.ignored;
                       }
                       // If a process is running (e.g. Next.js server): STOP IT!
@@ -3259,7 +4401,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                   }
 
                   // Ctrl + Shift + V: Paste into terminal
-                  if (isCtrl && isShift && event.logicalKey == LogicalKeyboardKey.keyV) {
+                  if (isCtrl &&
+                      isShift &&
+                      event.logicalKey == LogicalKeyboardKey.keyV) {
                     Clipboard.getData(Clipboard.kTextPlain).then((clip) {
                       if (clip?.text != null && clip!.text!.isNotEmpty) {
                         final t = clip.text!;
@@ -3269,10 +4413,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                           final before = current.substring(0, sel.start);
                           final after = current.substring(sel.end);
                           _termCtrl.text = '$before$t$after';
-                          _termCtrl.selection = TextSelection.collapsed(offset: sel.start + t.length);
+                          _termCtrl.selection = TextSelection.collapsed(
+                              offset: sel.start + t.length);
                         } else {
                           _termCtrl.text += t;
-                          _termCtrl.selection = TextSelection.collapsed(offset: _termCtrl.text.length);
+                          _termCtrl.selection = TextSelection.collapsed(
+                              offset: _termCtrl.text.length);
                         }
                       }
                     });
@@ -3310,11 +4456,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                     ..._termLogs.map((line) {
                       Color lineColor = const Color(0xFFCCCCDD);
                       if (line.startsWith('❌')) lineColor = Colors.redAccent;
-                      if (line.startsWith('✓')) lineColor = const Color(0xFF4CAF50);
-                      if (line.startsWith('🌐')) lineColor = const Color(0xFF54C5F8);
+                      if (line.startsWith('✓'))
+                        lineColor = const Color(0xFF4CAF50);
+                      if (line.startsWith('🌐'))
+                        lineColor = const Color(0xFF54C5F8);
                       if (line.startsWith('⚡')) lineColor = Colors.amber;
                       if (line.startsWith('──')) lineColor = _G.textSec;
-                      if (line.startsWith('📁')) lineColor = const Color(0xFF54C5F8);
+                      if (line.startsWith('📁'))
+                        lineColor = const Color(0xFF54C5F8);
                       if (line.startsWith('^C')) lineColor = Colors.amber;
                       return SelectableText(
                         line,
@@ -3343,7 +4492,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
                           Expanded(
                             child: Theme(
                               data: Theme.of(context).copyWith(
-                                inputDecorationTheme: const InputDecorationTheme(
+                                inputDecorationTheme:
+                                    const InputDecorationTheme(
                                   filled: false,
                                   fillColor: Colors.transparent,
                                   border: InputBorder.none,
@@ -3459,7 +4609,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
             style: GoogleFonts.inter(color: _G.textMuted, fontSize: 10.5),
           ),
           const SizedBox(width: _G.sp * 2),
-          Text('UTF-8', style: GoogleFonts.inter(color: _G.textMuted, fontSize: 10.5)),
+          Text('UTF-8',
+              style: GoogleFonts.inter(color: _G.textMuted, fontSize: 10.5)),
         ],
       ),
     );
@@ -3471,7 +4622,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
       children: [
         Icon(icon, size: 11, color: color ?? _G.textMuted),
         const SizedBox(width: 3),
-        Text(label, style: GoogleFonts.inter(color: _G.textMuted, fontSize: 10.5)),
+        Text(label,
+            style: GoogleFonts.inter(color: _G.textMuted, fontSize: 10.5)),
       ],
     );
   }
@@ -3508,7 +4660,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
               ),
               child: Center(
                 child: Icon(
-                  _terminalOpen ? LucideIcons.chevronDown : LucideIcons.chevronUp,
+                  _terminalOpen
+                      ? LucideIcons.chevronDown
+                      : LucideIcons.chevronUp,
                   size: 17,
                   color: _terminalOpen ? Colors.white : const Color(0xFF555566),
                 ),
@@ -3517,7 +4671,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
           ),
           const SizedBox(width: 10),
           Text(
-            _terminalOpen ? 'Terminal  ·  tap ^ to close' : 'tap ^ to open terminal',
+            _terminalOpen
+                ? 'Terminal  ·  tap ^ to close'
+                : 'tap ^ to open terminal',
             style: GoogleFonts.inter(
               color: const Color(0xFF444455),
               fontSize: 11,
@@ -3617,8 +4773,7 @@ class _GlassDialog extends StatelessWidget {
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  onPressed: () =>
-                      Navigator.of(context).pop(controller.text),
+                  onPressed: () => Navigator.of(context).pop(controller.text),
                   child: Text(confirmLabel,
                       style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                 ),
@@ -3637,7 +4792,8 @@ class _VisualFileManagerDialog extends StatefulWidget {
   const _VisualFileManagerDialog({this.initialPath});
 
   @override
-  State<_VisualFileManagerDialog> createState() => _VisualFileManagerDialogState();
+  State<_VisualFileManagerDialog> createState() =>
+      _VisualFileManagerDialogState();
 }
 
 class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
@@ -3691,9 +4847,15 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final folderName = _currentPath.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).lastOrNull ?? _currentPath;
-    final isWindows = !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-    final isAndroid = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final folderName = _currentPath
+            .split(RegExp(r'[\\/]'))
+            .where((s) => s.isNotEmpty)
+            .lastOrNull ??
+        _currentPath;
+    final isWindows =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
     return AlertDialog(
       backgroundColor: const Color(0xFF141416),
@@ -3705,7 +4867,8 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
       title: Row(
         children: [
-          const Icon(LucideIcons.folderOpen, size: 22, color: Color(0xFF54C5F8)),
+          const Icon(LucideIcons.folderOpen,
+              size: 22, color: Color(0xFF54C5F8)),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -3722,7 +4885,8 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
                 const SizedBox(height: 2),
                 Text(
                   'Browse and select a project folder to open',
-                  style: GoogleFonts.inter(color: const Color(0xFF888899), fontSize: 11),
+                  style: GoogleFonts.inter(
+                      color: const Color(0xFF888899), fontSize: 11),
                 ),
               ],
             ),
@@ -3731,9 +4895,11 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
             Tooltip(
               message: 'Open Windows File Explorer',
               child: IconButton(
-                icon: const Icon(LucideIcons.externalLink, size: 18, color: Color(0xFF54C5F8)),
+                icon: const Icon(LucideIcons.externalLink,
+                    size: 18, color: Color(0xFF54C5F8)),
                 onPressed: () async {
-                  final native = await WorkspaceService.pickFolderNative(_currentPath);
+                  final native =
+                      await WorkspaceService.pickFolderNative(_currentPath);
                   if (native != null && native.isNotEmpty && context.mounted) {
                     Navigator.pop(context, native);
                   }
@@ -3758,12 +4924,14 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
               ),
               child: Row(
                 children: [
-                  const Icon(LucideIcons.folder, size: 16, color: Color(0xFFCCA352)),
+                  const Icon(LucideIcons.folder,
+                      size: 16, color: Color(0xFFCCA352)),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       _currentPath,
-                      style: GoogleFonts.jetBrainsMono(color: Colors.white, fontSize: 11.5),
+                      style: GoogleFonts.jetBrainsMono(
+                          color: Colors.white, fontSize: 11.5),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -3772,7 +4940,8 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
                     onTap: _goUp,
                     borderRadius: BorderRadius.circular(6),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: const Color(0x26FFFFFF),
                         borderRadius: BorderRadius.circular(6),
@@ -3780,9 +4949,12 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(LucideIcons.arrowUp, size: 12, color: Colors.white),
+                          const Icon(LucideIcons.arrowUp,
+                              size: 12, color: Colors.white),
                           const SizedBox(width: 4),
-                          Text('Up', style: GoogleFonts.inter(color: Colors.white, fontSize: 11)),
+                          Text('Up',
+                              style: GoogleFonts.inter(
+                                  color: Colors.white, fontSize: 11)),
                         ],
                       ),
                     ),
@@ -3804,11 +4976,14 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
                   ],
                   if (isAndroid) ...[
                     _chip('Storage', () => _navigateTo('/storage/emulated/0')),
-                    _chip('Download', () => _navigateTo('/storage/emulated/0/Download')),
-                    _chip('Documents', () => _navigateTo('/storage/emulated/0/Documents')),
+                    _chip('Download',
+                        () => _navigateTo('/storage/emulated/0/Download')),
+                    _chip('Documents',
+                        () => _navigateTo('/storage/emulated/0/Documents')),
                   ],
                   if (kIsWeb) ...[
-                    _chip('Web Workspace', () => _navigateTo('/web/MyBug_Workspace')),
+                    _chip('Web Workspace',
+                        () => _navigateTo('/web/MyBug_Workspace')),
                   ],
                 ],
               ),
@@ -3825,19 +5000,22 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
                 ),
                 child: _loading
                     ? const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF54C5F8)),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Color(0xFF54C5F8)),
                       )
                     : _subFolders.isEmpty
                         ? Center(
                             child: Text(
                               'No subdirectories in this folder\nYou can select this folder below',
                               textAlign: TextAlign.center,
-                              style: GoogleFonts.inter(color: const Color(0xFF666677), fontSize: 12),
+                              style: GoogleFonts.inter(
+                                  color: const Color(0xFF666677), fontSize: 12),
                             ),
                           )
                         : ListView.separated(
                             itemCount: _subFolders.length,
-                            separatorBuilder: (_, __) => const Divider(color: Color(0x0FFFFFFF), height: 1),
+                            separatorBuilder: (_, __) => const Divider(
+                                color: Color(0x0FFFFFFF), height: 1),
                             itemBuilder: (ctx, i) {
                               final path = _subFolders[i];
                               final sep = path.contains('\\') ? '\\' : '/';
@@ -3845,13 +5023,17 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
                               return ListTile(
                                 dense: true,
                                 visualDensity: VisualDensity.compact,
-                                leading: const Icon(LucideIcons.folder, size: 16, color: Color(0xFFCCA352)),
+                                leading: const Icon(LucideIcons.folder,
+                                    size: 16, color: Color(0xFFCCA352)),
                                 title: Text(
                                   name,
-                                  style: GoogleFonts.inter(color: const Color(0xFFEEEEEE), fontSize: 12.5),
+                                  style: GoogleFonts.inter(
+                                      color: const Color(0xFFEEEEEE),
+                                      fontSize: 12.5),
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                trailing: const Icon(LucideIcons.chevronRight, size: 14, color: Color(0xFF555566)),
+                                trailing: const Icon(LucideIcons.chevronRight,
+                                    size: 14, color: Color(0xFF555566)),
                                 onTap: () => _navigateTo(path),
                               );
                             },
@@ -3865,14 +5047,16 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel', style: TextStyle(color: Color(0xFF888899))),
+          child:
+              const Text('Cancel', style: TextStyle(color: Color(0xFF888899))),
         ),
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF54C5F8),
             foregroundColor: Colors.black,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           icon: const Icon(LucideIcons.check, size: 16),
           label: Text(
@@ -3893,7 +5077,8 @@ class _VisualFileManagerDialogState extends State<_VisualFileManagerDialog> {
         backgroundColor: const Color(0x1FFFFFFF),
         side: const BorderSide(color: Color(0x26FFFFFF)),
         labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-        label: Text(label, style: GoogleFonts.inter(color: Colors.white, fontSize: 11)),
+        label: Text(label,
+            style: GoogleFonts.inter(color: Colors.white, fontSize: 11)),
         onPressed: onTap,
       ),
     );

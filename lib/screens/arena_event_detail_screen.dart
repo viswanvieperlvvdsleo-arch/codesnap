@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../models/task.dart';
+import '../services/arena_service.dart';
 import '../widgets/spring_button.dart';
 
 /// ─── Arena Event Detail Screen ──────────────────────────────────────────────
@@ -34,11 +35,23 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
   void initState() {
     super.initState();
     _task = widget.task;
+    _isBookmarked = _task.isBookmarked;
+    _hasJoined = _task.currentUserTeamId != null;
     _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
         setState(() => _activeTabIndex = _tabController.index);
       }
+    });
+  }
+
+  Future<void> _reloadEvent() async {
+    final event = await ArenaService.fetchEvent(_task.id);
+    if (!mounted || event == null) return;
+    setState(() {
+      _task = event;
+      _isBookmarked = event.isBookmarked;
+      _hasJoined = event.currentUserTeamId != null;
     });
   }
 
@@ -48,55 +61,66 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
     super.dispose();
   }
 
-  void _castVoteForTeam(TeamShowdown team) {
-    setState(() {
-      team.votes += 1;
-      _task.totalVotes += 1;
-    });
-
-    ScaffoldMessenger.of(context).removeCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        behavior: SnackBarBehavior.floating,
-        content: Center(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0F1017).withOpacity(0.88),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.4)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.5),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(LucideIcons.checkCircle2, color: Color(0xFF00E676), size: 18),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Vote registered for ${team.teamName}! 🎉',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
-                    ),
-                  ],
+  Future<void> _castVoteForTeam(TeamShowdown team) async {
+    try {
+      await ArenaService.castVote(eventId: _task.id, teamId: team.id);
+      await _reloadEvent();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          behavior: SnackBarBehavior.floating,
+          content: Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F1017).withOpacity(0.88),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: const Color(0xFF54C5F8).withOpacity(0.4)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.5),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(LucideIcons.checkCircle2,
+                          color: Color(0xFF00E676), size: 18),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Vote registered for ${team.teamName}! 🎉',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
+          duration: const Duration(seconds: 2),
         ),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Vote failed: $error')),
+      );
+    }
   }
 
   void _showJoinTeamModal() {
@@ -119,11 +143,14 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
                 child: Container(
-                  width: MediaQuery.of(context).size.width > 500 ? 460 : MediaQuery.of(context).size.width - 36,
+                  width: MediaQuery.of(context).size.width > 500
+                      ? 460
+                      : MediaQuery.of(context).size.width - 36,
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.28), width: 1.2),
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -158,10 +185,12 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                               Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF54C5F8).withOpacity(0.18),
+                                  color:
+                                      const Color(0xFF54C5F8).withOpacity(0.18),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(LucideIcons.users, size: 18, color: Color(0xFF54C5F8)),
+                                child: const Icon(LucideIcons.users,
+                                    size: 18, color: Color(0xFF54C5F8)),
                               ),
                               const SizedBox(width: 12),
                               const Text(
@@ -182,7 +211,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                                 color: Colors.white.withOpacity(0.08),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(LucideIcons.x, size: 15, color: Colors.white70),
+                              child: const Icon(LucideIcons.x,
+                                  size: 15, color: Colors.white70),
                             ),
                           ),
                         ],
@@ -190,21 +220,33 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                       const SizedBox(height: 18),
                       Text(
                         'Team Name',
-                        style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.7),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 6),
-                      _buildGlassInput(teamNameCtrl, 'e.g. CyberVanguard, NeuralHacks'),
+                      _buildGlassInput(
+                          teamNameCtrl, 'e.g. CyberVanguard, NeuralHacks'),
                       const SizedBox(height: 14),
                       Text(
                         'Project Vision / Idea',
-                        style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.7),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 6),
-                      _buildGlassInput(ideaCtrl, 'Briefly describe your project concept...', maxLines: 3),
+                      _buildGlassInput(
+                          ideaCtrl, 'Briefly describe your project concept...',
+                          maxLines: 3),
                       const SizedBox(height: 14),
                       Text(
                         'Team Members',
-                        style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.7),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 6),
                       _buildGlassInput(membersCtrl, 'Comma separated handles'),
@@ -215,56 +257,69 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                             child: SpringButton(
                               onTap: () => Navigator.pop(ctx),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.08),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.white.withOpacity(0.12)),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.12)),
                                 ),
-                                child: const Text('Cancel', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+                                child: const Text('Cancel',
+                                    style: TextStyle(
+                                        color: Colors.white70,
+                                        fontWeight: FontWeight.w600)),
                               ),
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: SpringButton(
-                              onTap: () {
+                              onTap: () async {
                                 if (teamNameCtrl.text.trim().isEmpty) return;
-                                setState(() {
-                                  _hasJoined = true;
-                                  _task.teamsCount += 1;
-                                  _task.teams.add(
-                                    TeamShowdown(
-                                      id: 'team-${DateTime.now().millisecondsSinceEpoch}',
-                                      teamName: teamNameCtrl.text.trim(),
-                                      projectTitle: ideaCtrl.text.trim().isNotEmpty ? ideaCtrl.text.trim() : 'New Challenger',
-                                      growthUpdate: 'Just registered! Setting up project architecture in Bug Workspace.',
-                                      votes: 1,
-                                      memberAvatars: const [
-                                        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-                                        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100',
-                                      ],
+                                try {
+                                  await ArenaService.registerTeam(
+                                    eventId: _task.id,
+                                    teamName: teamNameCtrl.text,
+                                    projectTitle: ideaCtrl.text,
+                                    memberHandles: membersCtrl.text
+                                        .split(',')
+                                        .map((value) => value.trim())
+                                        .where((value) => value.isNotEmpty)
+                                        .toList(),
+                                  );
+                                  await _reloadEvent();
+                                  if (!ctx.mounted) return;
+                                  Navigator.pop(ctx);
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content:
+                                          Text('Team registered in the Arena.'),
+                                      duration: Duration(seconds: 2),
                                     ),
                                   );
-                                });
-                                Navigator.pop(ctx);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Team successfully registered! Welcome to the Arena 🔥'),
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
+                                } catch (error) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                        content: Text(
+                                            'Team registration failed: $error')),
+                                  );
+                                }
                               },
                               child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: const Color(0xFF54C5F8),
                                   borderRadius: BorderRadius.circular(12),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: const Color(0xFF54C5F8).withOpacity(0.4),
+                                      color: const Color(0xFF54C5F8)
+                                          .withOpacity(0.4),
                                       blurRadius: 14,
                                       offset: const Offset(0, 4),
                                     ),
@@ -272,7 +327,9 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                                 ),
                                 child: const Text(
                                   'Confirm & Enter',
-                                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.w800),
+                                  style: TextStyle(
+                                      color: Colors.black,
+                                      fontWeight: FontWeight.w800),
                                 ),
                               ),
                             ),
@@ -316,11 +373,14 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
                 child: Container(
-                  width: MediaQuery.of(context).size.width > 500 ? 460 : MediaQuery.of(context).size.width - 36,
+                  width: MediaQuery.of(context).size.width > 500
+                      ? 460
+                      : MediaQuery.of(context).size.width - 36,
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.28), width: 1.2),
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -355,10 +415,12 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                               Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF00E676).withOpacity(0.18),
+                                  color:
+                                      const Color(0xFF00E676).withOpacity(0.18),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(LucideIcons.uploadCloud, size: 18, color: Color(0xFF00E676)),
+                                child: const Icon(LucideIcons.uploadCloud,
+                                    size: 18, color: Color(0xFF00E676)),
                               ),
                               const SizedBox(width: 12),
                               const Text(
@@ -379,39 +441,69 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                                 color: Colors.white.withOpacity(0.08),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(LucideIcons.x, size: 15, color: Colors.white70),
+                              child: const Icon(LucideIcons.x,
+                                  size: 15, color: Colors.white70),
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 18),
-                      Text('Repository / Workspace Folder', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                      Text('Repository / Workspace Folder',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12)),
                       const SizedBox(height: 6),
-                      _buildGlassInput(repoCtrl, 'https://github.com/... or codesnap://workspace/my-app'),
+                      _buildGlassInput(repoCtrl,
+                          'https://github.com/... or codesnap://workspace/my-app'),
                       const SizedBox(height: 14),
-                      Text('Live Preview URL (Optional)', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                      Text('Live Preview URL (Optional)',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12)),
                       const SizedBox(height: 6),
-                      _buildGlassInput(demoUrlCtrl, 'https://my-app.vercel.app'),
+                      _buildGlassInput(
+                          demoUrlCtrl, 'https://my-app.vercel.app'),
                       const SizedBox(height: 14),
-                      Text('Project Summary & Highlights', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                      Text('Project Summary & Highlights',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12)),
                       const SizedBox(height: 6),
-                      _buildGlassInput(summaryCtrl, 'What did you build? What AI agents were integrated?', maxLines: 3),
+                      _buildGlassInput(summaryCtrl,
+                          'What did you build? What AI agents were integrated?',
+                          maxLines: 3),
                       const SizedBox(height: 22),
                       SizedBox(
                         width: double.infinity,
                         child: SpringButton(
-                          onTap: () {
+                          onTap: () async {
                             if (repoCtrl.text.trim().isEmpty) return;
-                            setState(() {
-                              _task.submissionCount += 1;
-                            });
-                            Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Project submitted for judging! Community voting is open. 🚀'),
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
+                            try {
+                              await ArenaService.submitProject(
+                                eventId: _task.id,
+                                teamId: _task.currentUserTeamId,
+                                repoUrl: repoCtrl.text,
+                                demoUrl: demoUrlCtrl.text,
+                                summary: summaryCtrl.text,
+                              );
+                              await _reloadEvent();
+                              if (!ctx.mounted) return;
+                              Navigator.pop(ctx);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content:
+                                      Text('Project submitted for judging.'),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            } catch (error) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                    content: Text('Submission failed: $error')),
+                              );
+                            }
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -421,13 +513,17 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                               borderRadius: BorderRadius.circular(12),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF00E676).withOpacity(0.35),
+                                  color:
+                                      const Color(0xFF00E676).withOpacity(0.35),
                                   blurRadius: 14,
                                   offset: const Offset(0, 4),
                                 ),
                               ],
                             ),
-                            child: const Text('Submit Solution', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                            child: const Text('Submit Solution',
+                                style: TextStyle(
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ),
@@ -442,7 +538,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
     );
   }
 
-  Widget _buildGlassInput(TextEditingController ctrl, String hint, {int maxLines = 1}) {
+  Widget _buildGlassInput(TextEditingController ctrl, String hint,
+      {int maxLines = 1}) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
@@ -458,7 +555,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
         decoration: InputDecoration(
           border: InputBorder.none,
           hintText: hint,
-          hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 12.5),
+          hintStyle:
+              TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 12.5),
         ),
       ),
     );
@@ -534,7 +632,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                       return [
                         SliverToBoxAdapter(
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 12),
                             child: _buildHeroCard(timeRemaining, isPastDue),
                           ),
                         ),
@@ -574,7 +673,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: const Color(0xFF09090B).withOpacity(0.70),
-        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.10))),
+        border:
+            Border(bottom: BorderSide(color: Colors.white.withOpacity(0.10))),
       ),
       child: Row(
         children: [
@@ -587,7 +687,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white.withOpacity(0.12)),
               ),
-              child: const Icon(LucideIcons.arrowLeft, size: 18, color: Colors.white),
+              child: const Icon(LucideIcons.arrowLeft,
+                  size: 18, color: Colors.white),
             ),
           ),
           const SizedBox(width: 12),
@@ -604,14 +705,28 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
             ),
           ),
           SpringButton(
-            onTap: () {
-              setState(() => _isBookmarked = !_isBookmarked);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(_isBookmarked ? 'Event bookmarked!' : 'Removed from bookmarks'),
-                  duration: const Duration(seconds: 1),
-                ),
-              );
+            onTap: () async {
+              try {
+                final bookmarked = await ArenaService.toggleBookmark(
+                  eventId: _task.id,
+                  currentlyBookmarked: _isBookmarked,
+                );
+                if (!mounted) return;
+                setState(() => _isBookmarked = bookmarked);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(bookmarked
+                        ? 'Event bookmarked!'
+                        : 'Removed from bookmarks'),
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              } catch (error) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Bookmark failed: $error')),
+                );
+              }
             },
             child: Container(
               padding: const EdgeInsets.all(8),
@@ -621,7 +736,9 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                 border: Border.all(color: Colors.white.withOpacity(0.12)),
               ),
               child: Icon(
-                _isBookmarked ? LucideIcons.bookmarkCheck : LucideIcons.bookmark,
+                _isBookmarked
+                    ? LucideIcons.bookmarkCheck
+                    : LucideIcons.bookmark,
                 size: 16,
                 color: _isBookmarked ? const Color(0xFF54C5F8) : Colors.white70,
               ),
@@ -631,7 +748,9 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
           SpringButton(
             onTap: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Arena event share link copied!'), duration: Duration(seconds: 1)),
+                const SnackBar(
+                    content: Text('Arena event share link copied!'),
+                    duration: Duration(seconds: 1)),
               );
             },
             child: Container(
@@ -641,7 +760,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white.withOpacity(0.12)),
               ),
-              child: const Icon(LucideIcons.share2, size: 16, color: Colors.white70),
+              child: const Icon(LucideIcons.share2,
+                  size: 16, color: Colors.white70),
             ),
           ),
         ],
@@ -687,11 +807,14 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color: const Color(0xFF54C5F8).withOpacity(0.20),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.45)),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFF54C5F8).withOpacity(0.45)),
                           ),
                           child: Text(
                             _task.eventType.toUpperCase(),
@@ -705,17 +828,25 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                         ),
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: const Color(0xFF00E676).withOpacity(0.15),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFF00E676).withOpacity(0.4)),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFF00E676).withOpacity(0.4)),
                           ),
                           child: const Row(
                             children: [
-                              Icon(Icons.circle, color: Color(0xFF00E676), size: 6),
+                              Icon(Icons.circle,
+                                  color: Color(0xFF00E676), size: 6),
                               SizedBox(width: 5),
-                              Text('LIVE NOW', style: TextStyle(color: Color(0xFF00E676), fontSize: 10, fontWeight: FontWeight.bold)),
+                              Text('LIVE NOW',
+                                  style: TextStyle(
+                                      color: Color(0xFF00E676),
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold)),
                             ],
                           ),
                         ),
@@ -723,15 +854,18 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                     ),
                     // Prize Pill
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 5),
                       decoration: BoxDecoration(
                         color: const Color(0xFFFFD700).withOpacity(0.18),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.45)),
+                        border: Border.all(
+                            color: const Color(0xFFFFD700).withOpacity(0.45)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(LucideIcons.trophy, size: 13, color: Color(0xFFFFD700)),
+                          const Icon(LucideIcons.trophy,
+                              size: 13, color: Color(0xFFFFD700)),
                           const SizedBox(width: 5),
                           Text(
                             _task.prizePool,
@@ -773,7 +907,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
 
                 // Stats Row
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.06),
                     borderRadius: BorderRadius.circular(14),
@@ -782,11 +917,24 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _buildMetric(LucideIcons.clock, timeRemaining, isPastDue ? Colors.redAccent : const Color(0xFF54C5F8)),
-                      Container(width: 1, height: 24, color: Colors.white.withOpacity(0.12)),
-                      _buildMetric(LucideIcons.users, '${_task.teamsCount} Teams', Colors.white70),
-                      Container(width: 1, height: 24, color: Colors.white.withOpacity(0.12)),
-                      _buildMetric(LucideIcons.vote, '${_task.totalVotes} Votes', const Color(0xFFB388FF)),
+                      _buildMetric(
+                          LucideIcons.clock,
+                          timeRemaining,
+                          isPastDue
+                              ? Colors.redAccent
+                              : const Color(0xFF54C5F8)),
+                      Container(
+                          width: 1,
+                          height: 24,
+                          color: Colors.white.withOpacity(0.12)),
+                      _buildMetric(LucideIcons.users,
+                          '${_task.teamsCount} Teams', Colors.white70),
+                      Container(
+                          width: 1,
+                          height: 24,
+                          color: Colors.white.withOpacity(0.12)),
+                      _buildMetric(LucideIcons.vote,
+                          '${_task.totalVotes} Votes', const Color(0xFFB388FF)),
                     ],
                   ),
                 ),
@@ -806,7 +954,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
         const SizedBox(width: 6),
         Text(
           label,
-          style: TextStyle(color: color, fontSize: 11.5, fontWeight: FontWeight.w600),
+          style: TextStyle(
+              color: color, fontSize: 11.5, fontWeight: FontWeight.w600),
         ),
       ],
     );
@@ -838,9 +987,14 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                   curve: Curves.easeInOut,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: isSel ? const Color(0xFF54C5F8).withOpacity(0.22) : Colors.transparent,
+                    color: isSel
+                        ? const Color(0xFF54C5F8).withOpacity(0.22)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(10),
-                    border: isSel ? Border.all(color: const Color(0xFF54C5F8).withOpacity(0.55)) : null,
+                    border: isSel
+                        ? Border.all(
+                            color: const Color(0xFF54C5F8).withOpacity(0.55))
+                        : null,
                   ),
                   child: Text(
                     tabs[i],
@@ -873,7 +1027,10 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
             children: [
               Text(
                 'Developers must architect and deliver a fully functional software prototype adhering to the challenge themes. The application must feature responsive design, robust state management, and real-time interactive capabilities.',
-                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13, height: 1.5),
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 13,
+                    height: 1.5),
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -881,13 +1038,18 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                 runSpacing: 8,
                 children: _task.tags.map((t) {
                   return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.06),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Colors.white.withOpacity(0.12)),
                     ),
-                    child: Text('#$t', style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11.5, fontWeight: FontWeight.w600)),
+                    child: Text('#$t',
+                        style: const TextStyle(
+                            color: Color(0xFF54C5F8),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600)),
                   );
                 }).toList(),
               ),
@@ -895,36 +1057,57 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
           ),
         ),
         const SizedBox(height: 16),
-
         _buildSectionCard(
           title: 'Arena Rules & Guidelines',
           icon: LucideIcons.shieldCheck,
           content: Column(
             children: [
-              _buildRuleItem('1', 'All code must be committed to your workspace repository before the deadline.'),
-              _buildRuleItem('2', 'AI agent assistance is permitted and encouraged with transparent token usage.'),
-              _buildRuleItem('3', 'Teams can post growth updates to the feed to earn community votes.'),
-              _buildRuleItem('4', 'Zero external server costs required — code executes in sandbox or peer environments.'),
+              _buildRuleItem('1',
+                  'All code must be committed to your workspace repository before the deadline.'),
+              _buildRuleItem('2',
+                  'AI agent assistance is permitted and encouraged with transparent token usage.'),
+              _buildRuleItem('3',
+                  'Teams can post growth updates to the feed to earn community votes.'),
+              _buildRuleItem('4',
+                  'Zero external server costs required — code executes in sandbox or peer environments.'),
             ],
           ),
         ),
         const SizedBox(height: 16),
-
         _buildSectionCard(
           title: 'Organizer & Host Details',
           icon: LucideIcons.award,
           content: Row(
             children: [
-              const CircleAvatar(
+              CircleAvatar(
                 radius: 20,
-                backgroundImage: NetworkImage('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'),
+                backgroundColor: const Color(0xFF54C5F8).withOpacity(0.18),
+                backgroundImage: _task.ownerAvatarUrl.isNotEmpty
+                    ? NetworkImage(_task.ownerAvatarUrl)
+                    : null,
+                child: _task.ownerAvatarUrl.isEmpty
+                    ? Text(
+                        _task.ownerName.isEmpty
+                            ? 'A'
+                            : _task.ownerName[0].toUpperCase(),
+                        style: const TextStyle(
+                            color: Color(0xFF54C5F8),
+                            fontWeight: FontWeight.bold),
+                      )
+                    : null,
               ),
               const SizedBox(width: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('CloudSnap Developer Guild', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                  Text('Verified Community Host · Global Guild', style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+                  Text(_task.ownerName,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14)),
+                  Text('Arena organizer · ${_task.branch}',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.6), fontSize: 12)),
                 ],
               ),
             ],
@@ -949,11 +1132,19 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
               color: const Color(0xFF54C5F8).withOpacity(0.15),
               shape: BoxShape.circle,
             ),
-            child: Text(index, style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11, fontWeight: FontWeight.bold)),
+            child: Text(index,
+                style: const TextStyle(
+                    color: Color(0xFF54C5F8),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold)),
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(rule, style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12.5, height: 1.4)),
+            child: Text(rule,
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 12.5,
+                    height: 1.4)),
           ),
         ],
       ),
@@ -974,23 +1165,27 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
           decoration: BoxDecoration(
             color: const Color(0xFFB388FF).withOpacity(0.10),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFB388FF).withOpacity(0.30)),
+            border:
+                Border.all(color: const Color(0xFFB388FF).withOpacity(0.30)),
           ),
           child: Row(
             children: [
-              const Icon(LucideIcons.swords, color: Color(0xFFB388FF), size: 20),
+              const Icon(LucideIcons.swords,
+                  color: Color(0xFFB388FF), size: 20),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   'Community Showdown: Vote for the most innovative project implementation. Winners take the prize pool!',
-                  style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 12.5, height: 1.35),
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 12.5,
+                      height: 1.35),
                 ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 18),
-
         ...teams.map((team) {
           final pct = ((team.votes / totalVotes) * 100).toInt();
           return Container(
@@ -1009,12 +1204,16 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                   children: [
                     Text(
                       team.teamName,
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
                     ),
                     SpringButton(
                       onTap: () => _castVoteForTeam(team),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
                           color: const Color(0xFF54C5F8).withOpacity(0.2),
                           borderRadius: BorderRadius.circular(10),
@@ -1023,9 +1222,14 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(LucideIcons.vote, size: 14, color: Color(0xFF54C5F8)),
+                            const Icon(LucideIcons.vote,
+                                size: 14, color: Color(0xFF54C5F8)),
                             const SizedBox(width: 6),
-                            Text('Vote (${team.votes})', style: const TextStyle(color: Color(0xFF54C5F8), fontWeight: FontWeight.bold, fontSize: 12)),
+                            Text('Vote (${team.votes})',
+                                style: const TextStyle(
+                                    color: Color(0xFF54C5F8),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12)),
                           ],
                         ),
                       ),
@@ -1035,7 +1239,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                 const SizedBox(height: 6),
                 Text(
                   team.projectTitle,
-                  style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13),
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.75), fontSize: 13),
                 ),
                 const SizedBox(height: 12),
                 Container(
@@ -1046,12 +1251,15 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                   ),
                   child: Row(
                     children: [
-                      const Icon(LucideIcons.rss, size: 13, color: Colors.white54),
+                      const Icon(LucideIcons.rss,
+                          size: 13, color: Colors.white54),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           team.growthUpdate,
-                          style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 12),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.85),
+                              fontSize: 12),
                         ),
                       ),
                     ],
@@ -1072,7 +1280,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                   alignment: Alignment.centerRight,
                   child: Text(
                     '$pct% of total votes',
-                    style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.55), fontSize: 11),
                   ),
                 ),
               ],
@@ -1086,31 +1295,22 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
 
   // ── Tab 3: Live Growth Feed ───────────────────────────────────────────────
   Widget _buildGrowthFeedTab() {
-    final updates = [
-      {
-        'team': 'NeuroCoder',
-        'time': '10m ago',
-        'update': 'Finished implementing WebSocket terminal protocol! Realtime streaming working at 60 FPS.',
-        'tag': 'Milestone 2',
-      },
-      {
-        'team': 'CloudSnap Prime',
-        'time': '35m ago',
-        'update': 'Merged PR #14: Integrated deep liquid glass UI theme with spring physics on Android.',
-        'tag': 'UI Polish',
-      },
-      {
-        'team': 'PyWasm Core',
-        'time': '2h ago',
-        'update': 'Successfully compiled Python 3.12 sandbox to WebAssembly. Executes math benchmarks in browser!',
-        'tag': 'Backend',
-      },
-    ];
+    final updates = _task.teams;
 
     return ListView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       children: [
+        if (updates.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 48),
+            child: Center(
+              child: Text(
+                'No team updates yet.',
+                style: TextStyle(color: Colors.white54),
+              ),
+            ),
+          ),
         ...updates.map((u) {
           return Container(
             margin: const EdgeInsets.only(bottom: 14),
@@ -1130,29 +1330,49 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                       children: [
                         CircleAvatar(
                           radius: 14,
-                          backgroundColor: const Color(0xFF54C5F8).withOpacity(0.2),
+                          backgroundColor:
+                              const Color(0xFF54C5F8).withOpacity(0.2),
                           child: Text(
-                            (u['team'] as String)[0],
-                            style: const TextStyle(color: Color(0xFF54C5F8), fontWeight: FontWeight.bold, fontSize: 12),
+                            u.teamName.isEmpty ? 'T' : u.teamName[0],
+                            style: const TextStyle(
+                                color: Color(0xFF54C5F8),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text(u['team'] as String, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13.5)),
+                        Text(u.teamName,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13.5)),
                       ],
                     ),
-                    Text(u['time'] as String, style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11)),
+                    Text('Latest',
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.45),
+                            fontSize: 11)),
                   ],
                 ),
                 const SizedBox(height: 10),
-                Text(u['update'] as String, style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13, height: 1.4)),
+                Text(u.growthUpdate,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.85),
+                        fontSize: 13,
+                        height: 1.4)),
                 const SizedBox(height: 10),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.07),
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text(u['tag'] as String, style: const TextStyle(color: Color(0xFF00E676), fontSize: 11, fontWeight: FontWeight.w600)),
+                  child: Text(u.projectTitle,
+                      style: const TextStyle(
+                          color: Color(0xFF00E676),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600)),
                 ),
               ],
             ),
@@ -1169,11 +1389,12 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       children: [
-        _buildPrizeTier('1st Place Champion', '₹30,000 + Gold Guild Badge + Fast-Track Verification', const Color(0xFFFFD700), LucideIcons.trophy),
-        const SizedBox(height: 12),
-        _buildPrizeTier('2nd Place Runner-Up', '₹15,000 + Silver Showcase Feature', const Color(0xFFC0C0C0), LucideIcons.award),
-        const SizedBox(height: 12),
-        _buildPrizeTier('3rd Place Innovator', '₹5,000 + Community Bronze Honors', const Color(0xFFCD7F32), LucideIcons.medal),
+        _buildPrizeTier(
+          'Event Prize Pool',
+          _task.prizePool,
+          const Color(0xFFFFD700),
+          LucideIcons.trophy,
+        ),
         const SizedBox(height: 16),
         _buildSectionCard(
           title: 'Judging Criteria',
@@ -1191,7 +1412,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
     );
   }
 
-  Widget _buildPrizeTier(String rank, String reward, Color color, IconData icon) {
+  Widget _buildPrizeTier(
+      String rank, String reward, Color color, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1203,7 +1425,8 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: color.withOpacity(0.18), shape: BoxShape.circle),
+            decoration: BoxDecoration(
+                color: color.withOpacity(0.18), shape: BoxShape.circle),
             child: Icon(icon, color: color, size: 20),
           ),
           const SizedBox(width: 14),
@@ -1211,9 +1434,15 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(rank, style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.bold)),
+                Text(rank,
+                    style: TextStyle(
+                        color: color,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
-                Text(reward, style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12.5)),
+                Text(reward,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.8), fontSize: 12.5)),
               ],
             ),
           ),
@@ -1228,14 +1457,23 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12.5)),
-          Text(weight, style: const TextStyle(color: Color(0xFF54C5F8), fontWeight: FontWeight.bold, fontSize: 13)),
+          Text(label,
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.8), fontSize: 12.5)),
+          Text(weight,
+              style: const TextStyle(
+                  color: Color(0xFF54C5F8),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13)),
         ],
       ),
     );
   }
 
-  Widget _buildSectionCard({required String title, required IconData icon, required Widget content}) {
+  Widget _buildSectionCard(
+      {required String title,
+      required IconData icon,
+      required Widget content}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1250,7 +1488,11 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
             children: [
               Icon(icon, size: 16, color: const Color(0xFF54C5F8)),
               const SizedBox(width: 8),
-              Text(title, style: const TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.bold)),
+              Text(title,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 12),
@@ -1290,7 +1532,11 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                   children: [
                     Icon(LucideIcons.code, size: 16, color: Colors.white),
                     SizedBox(width: 8),
-                    Text('Workspace', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+                    Text('Workspace',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13)),
                   ],
                 ),
               ),
@@ -1315,7 +1561,10 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
-                      color: (_hasJoined ? const Color(0xFF00E676) : const Color(0xFF54C5F8)).withOpacity(0.35),
+                      color: (_hasJoined
+                              ? const Color(0xFF00E676)
+                              : const Color(0xFF54C5F8))
+                          .withOpacity(0.35),
                       blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
@@ -1324,11 +1573,19 @@ class _ArenaEventDetailScreenState extends State<ArenaEventDetailScreen>
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(_hasJoined ? LucideIcons.uploadCloud : LucideIcons.rocket, size: 16, color: Colors.black),
+                    Icon(
+                        _hasJoined
+                            ? LucideIcons.uploadCloud
+                            : LucideIcons.rocket,
+                        size: 16,
+                        color: Colors.black),
                     const SizedBox(width: 8),
                     Text(
                       _hasJoined ? 'Submit Project' : 'Register / Join Team',
-                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 13),
+                      style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 13),
                     ),
                   ],
                 ),
@@ -1351,7 +1608,8 @@ class _SliverGlassTabBarDelegate extends SliverPersistentHeaderDelegate {
   double get maxExtent => 58;
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
     return tabBar;
   }
 

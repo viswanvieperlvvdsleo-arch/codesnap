@@ -20,6 +20,8 @@ dependencies:
   code_text_field: ^1.1.0
   highlight: ^0.7.0
   supabase_flutter: ^2.8.0
+  pdfrx: ^2.4.8
+  file_saver: 0.4.0
 
 dev_dependencies:
   flutter_test:

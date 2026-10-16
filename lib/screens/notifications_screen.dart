@@ -1,30 +1,31 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../widgets/spring_button.dart';
-import '../models/user_profile.dart';
-import '../utils/mock_data.dart';
-import 'user_profile_detail_screen.dart';
+import 'people_profile_detail_screen.dart';
 import 'chat_screen.dart';
 import 'individual_chat_screen.dart';
 import '../services/supabase_service.dart';
 import '../services/supabase_data_service.dart';
+import '../services/realtime_sync_service.dart';
+import '../services/chat_service.dart';
 
 // ── Liquid Glass Color Tokens ────────────────────────────────────────────────
-const _kBgDark        = Color(0xFF09090B);
-const _kGlassSurface   = Color(0x14FFFFFF); // rgba(255,255,255,0.08)
-const _kGlassElevated  = Color(0x1FFFFFFF); // rgba(255,255,255,0.12)
-const _kGlassBorder    = Color(0x26FFFFFF); // rgba(255,255,255,0.15)
-const _kAccentCyan     = Color(0xFF54C5F8);
-const _kAccentGold     = Color(0xFFFFD700);
-const _kAccentPink     = Color(0xFFFF4864);
-const _kAccentBlue     = Color(0xFF4A68FF);
+const _kBgDark = Color(0xFF09090B);
+const _kGlassSurface = Color(0x14FFFFFF); // rgba(255,255,255,0.08)
+const _kGlassElevated = Color(0x1FFFFFFF); // rgba(255,255,255,0.12)
+const _kGlassBorder = Color(0x26FFFFFF); // rgba(255,255,255,0.15)
+const _kAccentCyan = Color(0xFF54C5F8);
+const _kAccentGold = Color(0xFFFFD700);
+const _kAccentPink = Color(0xFFFF4864);
+const _kAccentBlue = Color(0xFF4A68FF);
 
 enum NotificationCategory { all, snaps, likes, comments, mentions, system }
 
 class NotificationItem {
   final String id;
+  final String actorId;
   final String actorName;
   final String actorHandle;
   final String actorAvatar;
@@ -38,6 +39,7 @@ class NotificationItem {
 
   NotificationItem({
     required this.id,
+    this.actorId = '',
     required this.actorName,
     required this.actorHandle,
     required this.actorAvatar,
@@ -62,6 +64,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   NotificationCategory _selectedCategory = NotificationCategory.all;
 
   late List<NotificationItem> _notifications;
+  VoidCallback? _stopRealtime;
+  Timer? _realtimeRefreshTimer;
 
   @override
   void initState() {
@@ -71,7 +75,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         id: 'n1',
         actorName: 'Prabhatt',
         actorHandle: 'prabhatt_n07',
-        actorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+        actorAvatar:
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
         message: 'liked your post "Fluid liquid glass shader on mobile"',
         timeAgo: '5m ago',
         category: NotificationCategory.likes,
@@ -84,7 +89,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         id: 'n2',
         actorName: 'Sowmya Sri',
         actorHandle: 'sowmya_sri__143_',
-        actorAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200',
+        actorAvatar:
+            'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200',
         message: 'started snapping with you',
         timeAgo: '18m ago',
         category: NotificationCategory.snaps,
@@ -96,8 +102,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         id: 'n3',
         actorName: 'Sairam Mallipudi',
         actorHandle: '_sairam_mallipudi_',
-        actorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200',
-        message: 'commented: "The specular highlights and 60fps blur are super crisp! 🔥"',
+        actorAvatar:
+            'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200',
+        message:
+            'commented: "The specular highlights and 60fps blur are super crisp! 🔥"',
         timeAgo: '42m ago',
         category: NotificationCategory.comments,
         icon: LucideIcons.messageSquare,
@@ -109,8 +117,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         id: 'n4',
         actorName: 'Elena Rostova',
         actorHandle: 'elena.codes',
-        actorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
-        message: 'mentioned you in a comment: "@you check out the GLSL shader pass"',
+        actorAvatar:
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+        message:
+            'mentioned you in a comment: "@you check out the GLSL shader pass"',
         timeAgo: '1h ago',
         category: NotificationCategory.mentions,
         icon: LucideIcons.atSign,
@@ -121,7 +131,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         id: 'n5',
         actorName: 'Gowtham Kumar',
         actorHandle: 'gowtham401945',
-        actorAvatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200',
+        actorAvatar:
+            'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200',
         message: 'started snapping with you',
         timeAgo: '3h ago',
         category: NotificationCategory.snaps,
@@ -133,7 +144,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         id: 'n6',
         actorName: 'CodeSnap Core',
         actorHandle: 'system',
-        actorAvatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200',
+        actorAvatar:
+            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200',
         message: 'Your moment was featured in the Community Daily Digest!',
         timeAgo: 'Yesterday',
         category: NotificationCategory.system,
@@ -145,7 +157,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         id: 'n7',
         actorName: 'Nandhini',
         actorHandle: 'nandhini.11117',
-        actorAvatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200',
+        actorAvatar:
+            'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200',
         message: 'liked your moment "Kyoto Dusk Aesthetics"',
         timeAgo: '2d ago',
         category: NotificationCategory.likes,
@@ -154,9 +167,91 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         isRead: true,
       ),
     ];
+    _notifications.clear();
+    _loadNotifications();
+    _stopRealtime = RealtimeSyncService.instance.subscribe(
+      const {'notifications'},
+      (_) {
+        _realtimeRefreshTimer?.cancel();
+        _realtimeRefreshTimer =
+            Timer(const Duration(milliseconds: 200), _loadNotifications);
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _stopRealtime?.call();
+    _realtimeRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadNotifications() async {
+    final rows = await SupabaseDataService.fetchNotifications();
+    final loaded = <NotificationItem>[];
+    for (final row in rows) {
+      final actorId = row['actor_id']?.toString() ?? '';
+      final actor = actorId.isEmpty
+          ? null
+          : await SupabaseDataService.fetchDeveloperById(actorId);
+      final type = row['type']?.toString() ?? 'system';
+      final category = switch (type) {
+        'follow' || 'snap' => NotificationCategory.snaps,
+        'like' => NotificationCategory.likes,
+        'comment' => NotificationCategory.comments,
+        'mention' => NotificationCategory.mentions,
+        _ => NotificationCategory.system,
+      };
+      final (icon, color) = switch (category) {
+        NotificationCategory.snaps => (LucideIcons.userPlus, _kAccentBlue),
+        NotificationCategory.likes => (LucideIcons.heart, _kAccentPink),
+        NotificationCategory.comments => (
+            LucideIcons.messageSquare,
+            _kAccentCyan
+          ),
+        NotificationCategory.mentions => (LucideIcons.atSign, _kAccentGold),
+        _ => (LucideIcons.sparkles, _kAccentGold),
+      };
+      final createdAt = DateTime.tryParse(row['created_at']?.toString() ?? '');
+      final actorName = actor?['full_name']?.toString().trim();
+      final actorHandle = actor?['username']?.toString().trim();
+      loaded.add(NotificationItem(
+        id: row['id'].toString(),
+        actorId: actorId,
+        actorName: actorName?.isNotEmpty == true
+            ? actorName!
+            : (actorHandle?.isNotEmpty == true ? actorHandle! : 'CodeSnap'),
+        actorHandle: actorHandle?.isNotEmpty == true ? actorHandle! : 'system',
+        actorAvatar: actor?['avatar_url']?.toString() ??
+            'https://api.dicebear.com/9.x/initials/png?seed=CodeSnap',
+        message: row['body']?.toString().trim().isNotEmpty == true
+            ? row['body'].toString()
+            : row['title']?.toString() ?? 'Notification',
+        timeAgo: _timeAgo(createdAt),
+        category: category,
+        icon: icon,
+        iconColor: color,
+        isRead: row['is_read'] == true,
+      ));
+    }
+    if (mounted) setState(() => _notifications = loaded);
+  }
+
+  String _timeAgo(DateTime? value) {
+    if (value == null) return '';
+    final difference = DateTime.now().difference(value.toLocal());
+    if (difference.inMinutes < 1) return 'Now';
+    if (difference.inHours < 1) return '${difference.inMinutes}m ago';
+    if (difference.inDays < 1) return '${difference.inHours}h ago';
+    if (difference.inDays < 7) return '${difference.inDays}d ago';
+    return '${value.toLocal().day}/${value.toLocal().month}/${value.toLocal().year}';
   }
 
   void _markAllAsRead() {
+    final unreadIds = _notifications
+        .where((notification) => !notification.isRead)
+        .map((notification) => notification.id)
+        .toList(growable: false);
     setState(() {
       for (final n in _notifications) {
         n.isRead = true;
@@ -169,59 +264,69 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
-  }
-
-  void _openActorProfile(NotificationItem item) {
-    final user = MockData.getUserProfileForAuthor(
-      username: item.actorHandle,
-      avatarUrl: item.actorAvatar,
-    );
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (ctx) => UserProfileDetailScreen(user: user),
-      ),
-    );
-  }
-
-  void _openDirectChatWithActor(NotificationItem item) {
-    final store = ChatStateStore.instance;
-    ChatConversation? conv;
-    try {
-      conv = store.conversations.firstWhere(
-        (c) =>
-            c.name.toLowerCase() == item.actorName.toLowerCase() ||
-            c.name.toLowerCase() == item.actorHandle.toLowerCase(),
-      );
-    } catch (_) {
-      conv = ChatConversation(
-        id: 'user_${item.actorHandle}',
-        name: item.actorName,
-        role: '@${item.actorHandle}',
-        avatarUrl: item.actorAvatar,
-        isOnline: true,
-        lastMessage: 'Started chatting',
-        time: 'Now',
-        unreadCount: 0,
-        messages: [],
-      );
-      store.conversations.insert(0, conv);
+    for (final id in unreadIds) {
+      SupabaseDataService.markNotificationRead(id);
     }
+  }
 
-    store.selectedConversationId = conv.id;
-
+  Future<void> _openActorProfile(NotificationItem item) async {
+    if (item.actorId.isEmpty) return;
+    if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (ctx) => IndividualChatScreen(
-          conversation: conv!,
-          defaultWallpaper: store.defaultWallpaper,
-          allConversations: store.conversations,
-        ),
+        builder: (ctx) => PeopleProfileDetailScreen(userId: item.actorId),
       ),
     );
+  }
+
+  Future<void> _openDirectChatWithActor(NotificationItem item) async {
+    if (item.actorId.isEmpty) return;
+    final store = ChatStateStore.instance;
+    try {
+      final conversationId =
+          await ChatService.getOrCreateDirectConversation(item.actorId);
+      if (!mounted) return;
+      ChatConversation conv;
+      try {
+        conv = store.conversations
+            .firstWhere((conversation) => conversation.id == conversationId);
+      } catch (_) {
+        conv = ChatConversation(
+          id: conversationId,
+          name: item.actorName,
+          role: '@${item.actorHandle}',
+          avatarUrl: item.actorAvatar,
+          isOnline: true,
+          lastMessage: 'Started chatting',
+          time: 'Now',
+          unreadCount: 0,
+          messages: [],
+        );
+        store.conversations.insert(0, conv);
+      }
+
+      store.selectedConversationId = conv.id;
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (ctx) => IndividualChatScreen(
+            conversation: conv,
+            defaultWallpaper: store.defaultWallpaper,
+            allConversations: store.conversations,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open chat: $error')),
+      );
+    }
   }
 
   void _handleNotificationTap(NotificationItem item) {
     setState(() => item.isRead = true);
+    SupabaseDataService.markNotificationRead(item.id);
 
     if (item.category == NotificationCategory.snaps) {
       _openActorProfile(item);
@@ -238,7 +343,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (_selectedCategory == NotificationCategory.all) {
       return _notifications;
     }
-    return _notifications.where((n) => n.category == _selectedCategory).toList();
+    return _notifications
+        .where((n) => n.category == _selectedCategory)
+        .toList();
   }
 
   @override
@@ -264,7 +371,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         shape: BoxShape.circle,
                         border: Border.all(color: _kGlassBorder),
                       ),
-                      child: const Icon(LucideIcons.arrowLeft, color: Colors.white, size: 20),
+                      child: const Icon(LucideIcons.arrowLeft,
+                          color: Colors.white, size: 20),
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -280,11 +388,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   if (unreadCount > 0) ...[
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
                         color: _kAccentCyan.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: _kAccentCyan.withOpacity(0.5)),
+                        border:
+                            Border.all(color: _kAccentCyan.withOpacity(0.5)),
                       ),
                       child: Text(
                         '$unreadCount new',
@@ -300,7 +410,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   SpringButton(
                     onTap: _markAllAsRead,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
                         color: _kGlassSurface,
                         borderRadius: BorderRadius.circular(12),
@@ -308,11 +419,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       ),
                       child: const Row(
                         children: [
-                          Icon(LucideIcons.checkCheck, color: Colors.white70, size: 15),
+                          Icon(LucideIcons.checkCheck,
+                              color: Colors.white70, size: 15),
                           SizedBox(width: 6),
                           Text(
                             'Read all',
-                            style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600),
                           ),
                         ],
                       ),
@@ -348,18 +463,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(LucideIcons.bellOff, size: 48, color: Colors.white.withOpacity(0.2)),
+                          Icon(LucideIcons.bellOff,
+                              size: 48, color: Colors.white.withOpacity(0.2)),
                           const SizedBox(height: 12),
                           Text(
                             'No notifications in this category',
-                            style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 14),
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.55),
+                                fontSize: 14),
                           ),
                         ],
                       ),
                     )
                   : ListView.builder(
                       physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
                       itemCount: _filteredNotifications.length,
                       itemBuilder: (context, index) {
                         final item = _filteredNotifications[index];
@@ -376,11 +495,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             alignment: Alignment.centerLeft,
                             child: const Row(
                               children: [
-                                Icon(LucideIcons.trash2, color: Colors.white, size: 20),
+                                Icon(LucideIcons.trash2,
+                                    color: Colors.white, size: 20),
                                 SizedBox(width: 8),
                                 Text(
                                   'Remove',
-                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
                                 ),
                               ],
                             ),
@@ -398,10 +521,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               children: [
                                 Text(
                                   'Remove',
-                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
                                 ),
                                 SizedBox(width: 8),
-                                Icon(LucideIcons.trash2, color: Colors.white, size: 20),
+                                Icon(LucideIcons.trash2,
+                                    color: Colors.white, size: 20),
                               ],
                             ),
                           ),
@@ -416,18 +543,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               SnackBar(
                                 backgroundColor: const Color(0xFF1E1F2A),
                                 behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
                                 content: const Text(
                                   'Notification removed',
-                                  style: TextStyle(color: Colors.white, fontSize: 13),
+                                  style: TextStyle(
+                                      color: Colors.white, fontSize: 13),
                                 ),
                                 action: SnackBarAction(
                                   label: 'Undo',
                                   textColor: const Color(0xFF54C5F8),
                                   onPressed: () {
                                     setState(() {
-                                      if (removedIndex >= 0 && removedIndex <= _notifications.length) {
-                                        _notifications.insert(removedIndex, removedItem);
+                                      if (removedIndex >= 0 &&
+                                          removedIndex <=
+                                              _notifications.length) {
+                                        _notifications.insert(
+                                            removedIndex, removedItem);
                                       } else {
                                         _notifications.add(removedItem);
                                       }
@@ -495,126 +627,131 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           color: Colors.redAccent.withOpacity(0.2),
           borderRadius: BorderRadius.circular(16),
         ),
-        child: const Icon(LucideIcons.trash2, color: Colors.redAccent, size: 20),
+        child:
+            const Icon(LucideIcons.trash2, color: Colors.redAccent, size: 20),
       ),
       child: GestureDetector(
-      onTap: () => _handleNotificationTap(item),
-      child: Container(
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: item.isRead ? const Color(0xFF111218) : const Color(0xFF161824),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: item.isRead ? _kGlassBorder : _kAccentCyan.withOpacity(0.35),
-          width: 1.0,
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Avatar with badge overlay
-          GestureDetector(
-            onTap: () => _openActorProfile(item),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: const Color(0xFF27272A),
-                  backgroundImage: NetworkImage(item.actorAvatar),
-                ),
-                Positioned(
-                  right: -2,
-                  bottom: -2,
-                  child: Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF09090B),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: item.iconColor, width: 1.2),
-                    ),
-                    child: Icon(item.icon, size: 10, color: item.iconColor),
-                  ),
-                ),
-              ],
+        onTap: () => _handleNotificationTap(item),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 5),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color:
+                item.isRead ? const Color(0xFF111218) : const Color(0xFF161824),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color:
+                  item.isRead ? _kGlassBorder : _kAccentCyan.withOpacity(0.35),
+              width: 1.0,
             ),
           ),
-          const SizedBox(width: 12),
-
-          // Message & Details
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                RichText(
-                  text: TextSpan(
-                    style: const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.35),
-                    children: [
-                      TextSpan(
-                        text: item.actorName,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const TextSpan(text: ' '),
-                      TextSpan(
-                        text: item.message,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Row(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Avatar with badge overlay
+              GestureDetector(
+                onTap: () => _openActorProfile(item),
+                child: Stack(
+                  clipBehavior: Clip.none,
                   children: [
-                    Text(
-                      item.timeAgo,
-                      style: TextStyle(
-                        color: const Color(0xFF8E8E93),
-                        fontSize: 11.5,
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: const Color(0xFF27272A),
+                      backgroundImage: NetworkImage(item.actorAvatar),
+                    ),
+                    Positioned(
+                      right: -2,
+                      bottom: -2,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF09090B),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: item.iconColor, width: 1.2),
+                        ),
+                        child: Icon(item.icon, size: 10, color: item.iconColor),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    if (!item.isRead)
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          color: _kAccentCyan,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
                   ],
                 ),
-              ],
-            ),
-          ),
-
-          // Action shortcut: Message or Profile
-          if (item.category == NotificationCategory.snaps ||
-              item.category == NotificationCategory.comments) ...[
-            const SizedBox(width: 8),
-            SpringButton(
-              onTap: () {
-                setState(() => item.isRead = true);
-                _openDirectChatWithActor(item);
-              },
-              child: Container(
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: _kGlassElevated,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: _kGlassBorder),
-                ),
-                child: const Icon(LucideIcons.messageSquare, size: 14, color: _kAccentCyan),
               ),
-            ),
-          ],
-        ],
-      ),
-    ),
+              const SizedBox(width: 12),
+
+              // Message & Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    RichText(
+                      text: TextSpan(
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 13.5, height: 1.35),
+                        children: [
+                          TextSpan(
+                            text: item.actorName,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const TextSpan(text: ' '),
+                          TextSpan(
+                            text: item.message,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.85),
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        Text(
+                          item.timeAgo,
+                          style: TextStyle(
+                            color: const Color(0xFF8E8E93),
+                            fontSize: 11.5,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        if (!item.isRead)
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: _kAccentCyan,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Action shortcut: Message or Profile
+              if (item.category == NotificationCategory.snaps ||
+                  item.category == NotificationCategory.comments) ...[
+                const SizedBox(width: 8),
+                SpringButton(
+                  onTap: () {
+                    setState(() => item.isRead = true);
+                    _openDirectChatWithActor(item);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: _kGlassElevated,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: _kGlassBorder),
+                    ),
+                    child: const Icon(LucideIcons.messageSquare,
+                        size: 14, color: _kAccentCyan),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

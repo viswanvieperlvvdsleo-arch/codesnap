@@ -11,7 +11,9 @@ import 'contact_info_screen.dart';
 import 'chat_screen.dart';
 import '../widgets/full_screen_media_viewer.dart';
 import '../services/supabase_service.dart';
-import '../services/supabase_data_service.dart';
+import '../services/chat_service.dart';
+import '../services/ai_chat_service.dart';
+import '../services/document_bytes_loader.dart';
 
 /// ─── Individual Chat Screen (Dedicated Page / Route) ────────────────────────
 /// Opened as a separate Navigator route on mobile/normal view so pressing the back
@@ -117,7 +119,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
       for (int i = 0; i < widget.conversation.messages.length; i++) {
         final m = widget.conversation.messages[i];
         if (m.text.toLowerCase().contains(q) ||
-            (m.mediaCaption != null && m.mediaCaption!.toLowerCase().contains(q))) {
+            (m.mediaCaption != null &&
+                m.mediaCaption!.toLowerCase().contains(q))) {
           _matchedMessageIndices.add(i);
         }
       }
@@ -135,7 +138,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   void _nextSearchMatch() {
     if (_matchedMessageIndices.isEmpty) return;
     setState(() {
-      _currentSearchMatchIndex = (_currentSearchMatchIndex + 1) % _matchedMessageIndices.length;
+      _currentSearchMatchIndex =
+          (_currentSearchMatchIndex + 1) % _matchedMessageIndices.length;
     });
     _jumpToSearchMatch(_currentSearchMatchIndex);
   }
@@ -143,7 +147,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   void _prevSearchMatch() {
     if (_matchedMessageIndices.isEmpty) return;
     setState(() {
-      _currentSearchMatchIndex = (_currentSearchMatchIndex - 1 + _matchedMessageIndices.length) % _matchedMessageIndices.length;
+      _currentSearchMatchIndex =
+          (_currentSearchMatchIndex - 1 + _matchedMessageIndices.length) %
+              _matchedMessageIndices.length;
     });
     _jumpToSearchMatch(_currentSearchMatchIndex);
   }
@@ -157,7 +163,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     });
 
     if (_messagesScrollCtrl.hasClients) {
-      final double targetOffset = (msgIdx * 90.0).clamp(0.0, _messagesScrollCtrl.position.maxScrollExtent);
+      final double targetOffset = (msgIdx * 90.0)
+          .clamp(0.0, _messagesScrollCtrl.position.maxScrollExtent);
       _messagesScrollCtrl.animateTo(
         targetOffset,
         duration: const Duration(milliseconds: 300),
@@ -180,19 +187,21 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     if (text.isEmpty) return;
 
     final now = DateTime.now();
-    final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final timeStr =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
+    final localMessage = ChatMessage(
+      id: 'msg_${now.microsecondsSinceEpoch}',
+      text: text,
+      isMe: true,
+      time: timeStr,
+      sentAt: now,
+      replyingTo: _replyingToMessage,
+      isDelivered: false,
+    );
+    final replyToId = _replyingToMessage?.id;
     setState(() {
-      widget.conversation.messages.add(
-        ChatMessage(
-          id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
-          text: text,
-          isMe: true,
-          time: timeStr,
-          replyingTo: _replyingToMessage,
-          isDelivered: true,
-        ),
-      );
+      widget.conversation.messages.add(localMessage);
       widget.conversation.lastMessage = text;
       widget.conversation.time = timeStr;
       _replyingToMessage = null;
@@ -206,13 +215,23 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
 
     _scrollToBottom();
     if (SupabaseService.isAuthenticated && !widget.conversation.isAiAssistant) {
-      SupabaseDataService.sendMessage(
+      ChatService.sendMessage(
         conversationId: widget.conversation.id,
         text: text,
-      );
+        replyToMessageId: replyToId,
+      ).then((_) {
+        if (mounted) setState(() => localMessage.isDelivered = true);
+      }).catchError((error) {
+        if (!mounted) return;
+        setState(() => widget.conversation.messages.remove(localMessage));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Message was not sent: $error')),
+        );
+      });
     }
 
-    if (widget.conversation.isAiAssistant || widget.conversation.id == 'server_terminal_ai') {
+    if (widget.conversation.isAiAssistant ||
+        widget.conversation.id == 'server_terminal_ai') {
       _handleAiTerminalResponse(text);
     }
   }
@@ -220,10 +239,12 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   void _sendMediaMessage({
     required String mediaType,
     required String mediaUrl,
+    required String fileName,
     String? caption,
   }) {
     final now = DateTime.now();
-    final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final timeStr =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
     final newMsg = ChatMessage(
       id: 'media_${DateTime.now().millisecondsSinceEpoch}',
@@ -256,23 +277,63 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
 
     _scrollToBottom();
 
-    // Simulate smooth upload progress
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (!mounted) return;
-      setState(() => newMsg.uploadProgress = 0.4);
-    });
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (!mounted) return;
-      setState(() => newMsg.uploadProgress = 0.8);
-    });
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (!mounted) return;
-      setState(() {
-        newMsg.uploadProgress = 1.0;
-        newMsg.isUploading = false;
-        newMsg.isDelivered = true;
-      });
-    });
+    if (widget.conversation.isAiAssistant) {
+      setState(() => widget.conversation.messages.remove(newMsg));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('AI media input is not enabled yet.')),
+      );
+      return;
+    }
+    () async {
+      try {
+        final bytes = await loadDocumentSourceBytes(mediaUrl);
+        await ChatService.sendMedia(
+          conversationId: widget.conversation.id,
+          messageType: mediaType,
+          fileName: fileName,
+          mimeType: _mediaMimeType(mediaType, fileName),
+          bytes: bytes,
+          text: caption?.trim() ?? '',
+        );
+        if (!mounted) return;
+        setState(() {
+          newMsg.uploadProgress = 1.0;
+          newMsg.isUploading = false;
+          newMsg.isDelivered = true;
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() => widget.conversation.messages.remove(newMsg));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Media upload failed: $error')),
+        );
+      }
+    }();
+  }
+
+  String _mediaMimeType(String type, String fileName) {
+    final extension =
+        fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
+    const byExtension = {
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'mp4': 'video/mp4',
+      'webm': 'video/webm',
+      'mp3': 'audio/mpeg',
+      'wav': 'audio/wav',
+      'pdf': 'application/pdf',
+      'txt': 'text/plain',
+      'zip': 'application/zip',
+    };
+    return byExtension[extension] ??
+        (type == 'image'
+            ? 'image/jpeg'
+            : type == 'video'
+                ? 'video/mp4'
+                : 'application/octet-stream');
   }
 
   void _scrollToBottom() {
@@ -289,28 +350,111 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
 
   // ── Single Emoji Reaction Logic (One reaction per message) ────────────────
   void _toggleEmojiReaction(ChatMessage msg, String emoji) {
+    final wasEnabled = msg.reactions.contains(emoji);
     setState(() {
-      if (msg.reactions.contains(emoji)) {
+      if (wasEnabled) {
         msg.reactions.remove(emoji);
       } else {
         msg.reactions = [emoji];
       }
     });
+    if (!msg.id.startsWith('msg_') && !msg.id.startsWith('media_')) {
+      ChatService.toggleReaction(
+        messageId: msg.id,
+        emoji: emoji,
+        enabled: !wasEnabled,
+      ).catchError((_) {
+        if (!mounted) return;
+        setState(() {
+          if (wasEnabled) {
+            msg.reactions = [emoji];
+          } else {
+            msg.reactions.remove(emoji);
+          }
+        });
+      });
+    }
   }
 
   void _navigateToContactInfo() {
     setState(() => _showingContactInfo = true);
   }
 
+  Future<void> _startCall({required bool video}) async {
+    if (widget.conversation.isAiAssistant) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Calls are available for people chats.')),
+      );
+      return;
+    }
+    try {
+      final callId = await ChatService.startCall(
+        conversationId: widget.conversation.id,
+        video: video,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: const Color(0xFF14151A),
+          title: Text(
+            video ? 'Video call' : 'Voice call',
+            style: const TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 38,
+                backgroundImage: NetworkImage(widget.conversation.avatarUrl),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Calling ${widget.conversation.name}…',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'The call request is live on Supabase Realtime.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () async {
+                await ChatService.updateCall(callId, 'ended');
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+              },
+              icon: const Icon(LucideIcons.phoneOff),
+              label: const Text('End'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not start call: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final wallpaper = widget.conversation.customWallpaper ?? widget.defaultWallpaper;
+    final wallpaper =
+        widget.conversation.customWallpaper ?? widget.defaultWallpaper;
 
     if (_showingContactInfo) {
       return ContactInfoScreen(
         contactName: widget.conversation.name,
         contactAvatar: widget.conversation.avatarUrl,
-        contactHandle: '@${widget.conversation.name.toLowerCase().replaceAll(' ', '_')}',
+        contactHandle:
+            '@${widget.conversation.name.toLowerCase().replaceAll(' ', '_')}',
         isOnline: widget.conversation.isOnline,
         wallpaper: wallpaper,
         onBack: () => setState(() => _showingContactInfo = false),
@@ -318,7 +462,10 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     }
 
     return PopScope(
-      canPop: !_showingContactInfo && !_isMultiSelectMode && !widget.isEmbedded && Navigator.canPop(context),
+      canPop: !_showingContactInfo &&
+          !_isMultiSelectMode &&
+          !widget.isEmbedded &&
+          Navigator.canPop(context),
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         _handleBack();
@@ -343,7 +490,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     _buildMultiSelectTopBar()
                   else ...[
                     _buildNormalTopBar(),
-                    if (widget.conversation.isAiAssistant || widget.conversation.id == 'server_terminal_ai')
+                    if (widget.conversation.isAiAssistant ||
+                        widget.conversation.id == 'server_terminal_ai')
                       _buildServerTerminalBar(),
                   ],
 
@@ -351,18 +499,21 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                   Expanded(
                     child: ListView.builder(
                       controller: _messagesScrollCtrl,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
                       itemCount: widget.conversation.messages.length + 1,
                       itemBuilder: (context, index) {
                         if (index == 0) {
                           return Center(
                             child: Container(
                               margin: const EdgeInsets.symmetric(vertical: 12),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 5),
                               decoration: BoxDecoration(
                                 color: Colors.white.withOpacity(0.08),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: Colors.white.withOpacity(0.18)),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.18)),
                               ),
                               child: Text(
                                 'Today',
@@ -429,7 +580,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               onTap: _handleBack,
               child: const Padding(
                 padding: EdgeInsets.all(4),
-                child: Icon(LucideIcons.chevronLeft, size: 22, color: Colors.white),
+                child: Icon(LucideIcons.chevronLeft,
+                    size: 22, color: Colors.white),
               ),
             ),
             const SizedBox(width: 4),
@@ -476,22 +628,14 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
             ),
             const SizedBox(width: 4),
             SpringButton(
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Starting video call with ${c.name}...')),
-                );
-              },
+              onTap: () => _startCall(video: true),
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 5),
                 child: Icon(LucideIcons.video, size: 19, color: Colors.white),
               ),
             ),
             SpringButton(
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Starting voice call with ${c.name}...')),
-                );
-              },
+              onTap: () => _startCall(video: false),
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 5),
                 child: Icon(LucideIcons.phone, size: 19, color: Colors.white),
@@ -510,7 +654,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               onTap: _openThreeDotsMenu,
               child: const Padding(
                 padding: EdgeInsets.only(left: 3, right: 3),
-                child: Icon(LucideIcons.moreVertical, size: 19, color: Colors.white),
+                child: Icon(LucideIcons.moreVertical,
+                    size: 19, color: Colors.white),
               ),
             ),
           ],
@@ -527,7 +672,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFF090A10).withOpacity(0.85),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.35), width: 1.1),
+        border: Border.all(
+            color: const Color(0xFFFFD700).withOpacity(0.35), width: 1.1),
         boxShadow: [
           BoxShadow(
             color: const Color(0xFFFFD700).withOpacity(0.08),
@@ -549,7 +695,10 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                   color: Color(0xFF10B981),
                   shape: BoxShape.circle,
                   boxShadow: [
-                    BoxShadow(color: Color(0xFF10B981), blurRadius: 6, spreadRadius: 1),
+                    BoxShadow(
+                        color: Color(0xFF10B981),
+                        blurRadius: 6,
+                        spreadRadius: 1),
                   ],
                 ),
               ),
@@ -570,16 +719,20 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               SpringButton(
                 onTap: _showModelPickerSheet,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFFD700).withOpacity(0.18),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.6), width: 1),
+                    border: Border.all(
+                        color: const Color(0xFFFFD700).withOpacity(0.6),
+                        width: 1),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(LucideIcons.bot, size: 12, color: Color(0xFFFFD700)),
+                      const Icon(LucideIcons.bot,
+                          size: 12, color: Color(0xFFFFD700)),
                       const SizedBox(width: 5),
                       Text(
                         _currentAiModel,
@@ -590,7 +743,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                         ),
                       ),
                       const SizedBox(width: 3),
-                      const Icon(LucideIcons.chevronDown, size: 12, color: Color(0xFFFFD700)),
+                      const Icon(LucideIcons.chevronDown,
+                          size: 12, color: Color(0xFFFFD700)),
                     ],
                   ),
                 ),
@@ -603,8 +757,10 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
             physics: const BouncingScrollPhysics(),
             child: Row(
               children: [
-                _buildQuickTerminalChip('flutter analyze', LucideIcons.terminal),
-                _buildQuickTerminalChip('git diff --stat', LucideIcons.gitBranch),
+                _buildQuickTerminalChip(
+                    'flutter analyze', LucideIcons.terminal),
+                _buildQuickTerminalChip(
+                    'git diff --stat', LucideIcons.gitBranch),
                 _buildQuickTerminalChip('flutter test', LucideIcons.play),
                 _buildQuickTerminalChip('generate fix', LucideIcons.sparkles),
               ],
@@ -649,10 +805,26 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
 
   void _showModelPickerSheet() {
     final models = [
-      {'name': 'Claude 3.5 Sonnet', 'badge': 'Anthropic · Deep Logic', 'desc': 'Best for complex coding, architecture, refactoring'},
-      {'name': 'GPT-4o', 'badge': 'OpenAI · Multimodal', 'desc': 'High-speed reasoning, versatile coding & bug fixing'},
-      {'name': 'Codex', 'badge': 'OpenAI · Code Native', 'desc': 'Specialized code completion and CLI execution'},
-      {'name': 'Antigravity', 'badge': 'Google DeepMind · Agentic', 'desc': 'Multi-step autonomous terminal tool execution'},
+      {
+        'name': 'Claude 3.5 Sonnet',
+        'badge': 'Anthropic · Deep Logic',
+        'desc': 'Best for complex coding, architecture, refactoring'
+      },
+      {
+        'name': 'GPT-4o',
+        'badge': 'OpenAI · Multimodal',
+        'desc': 'High-speed reasoning, versatile coding & bug fixing'
+      },
+      {
+        'name': 'Codex',
+        'badge': 'OpenAI · Code Native',
+        'desc': 'Specialized code completion and CLI execution'
+      },
+      {
+        'name': 'Antigravity',
+        'badge': 'Google DeepMind · Agentic',
+        'desc': 'Multi-step autonomous terminal tool execution'
+      },
     ];
 
     showModalBottomSheet(
@@ -675,18 +847,24 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 child: Container(
                   width: 36,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 14),
               const Text(
                 'Select Active Terminal Model',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
               Text(
                 'Zero API billing: commands run through your server terminal session',
-                style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11.5),
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.55), fontSize: 11.5),
               ),
               const SizedBox(height: 14),
               ...models.map((m) {
@@ -702,28 +880,39 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       SnackBar(
                         backgroundColor: const Color(0xFF161824),
                         behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        content: Text('Switched terminal engine to ${m['name']}'),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        content:
+                            Text('Switched terminal engine to ${m['name']}'),
                       ),
                     );
                   },
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFFFFD700).withOpacity(0.14) : Colors.white.withOpacity(0.04),
+                      color: isSelected
+                          ? const Color(0xFFFFD700).withOpacity(0.14)
+                          : Colors.white.withOpacity(0.04),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isSelected ? const Color(0xFFFFD700).withOpacity(0.65) : Colors.white.withOpacity(0.1),
+                        color: isSelected
+                            ? const Color(0xFFFFD700).withOpacity(0.65)
+                            : Colors.white.withOpacity(0.1),
                         width: isSelected ? 1.4 : 1.0,
                       ),
                     ),
                     child: Row(
                       children: [
                         Icon(
-                          isSelected ? LucideIcons.checkCircle : LucideIcons.circle,
+                          isSelected
+                              ? LucideIcons.checkCircle
+                              : LucideIcons.circle,
                           size: 18,
-                          color: isSelected ? const Color(0xFFFFD700) : Colors.white38,
+                          color: isSelected
+                              ? const Color(0xFFFFD700)
+                              : Colors.white38,
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -735,21 +924,26 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                                   Text(
                                     m['name']!,
                                     style: TextStyle(
-                                      color: isSelected ? const Color(0xFFFFD700) : Colors.white,
+                                      color: isSelected
+                                          ? const Color(0xFFFFD700)
+                                          : Colors.white,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 13.5,
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 1.5),
                                     decoration: BoxDecoration(
                                       color: Colors.white.withOpacity(0.08),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
                                       m['badge']!,
-                                      style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 9.5),
+                                      style: TextStyle(
+                                          color: Colors.white.withOpacity(0.6),
+                                          fontSize: 9.5),
                                     ),
                                   ),
                                 ],
@@ -757,7 +951,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                               const SizedBox(height: 3),
                               Text(
                                 m['desc']!,
-                                style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11),
+                                style: TextStyle(
+                                    color: Colors.white.withOpacity(0.55),
+                                    fontSize: 11),
                               ),
                             ],
                           ),
@@ -774,11 +970,47 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     );
   }
 
-  void _handleAiTerminalResponse(String userText) {
+  Future<void> _handleAiTerminalResponse(String userText) async {
+    try {
+      final reply = await AiChatService.send(
+        message: userText,
+        threadId: widget.conversation.terminalSession,
+      );
+      if (!mounted) return;
+      final now = DateTime.now();
+      final timeStr =
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+      setState(() {
+        widget.conversation.terminalSession = reply.threadId;
+        widget.conversation.messages.add(ChatMessage(
+          id: reply.responseId ?? 'ai_${now.microsecondsSinceEpoch}',
+          text: reply.text,
+          isMe: false,
+          time: timeStr,
+          sentAt: now,
+          isDelivered: true,
+        ));
+        widget.conversation.lastMessage = reply.text;
+        widget.conversation.time = timeStr;
+      });
+      ChatStateStore.instance.notifyConversationsUpdated();
+      _scrollToBottom();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI is unavailable: $error')),
+      );
+    }
+  }
+
+  // Kept only for backwards-compatible rendering of old in-memory sessions.
+  // New messages always use the authenticated server function above.
+  void _handleLegacyAiTerminalResponse(String userText) {
     Future.delayed(const Duration(milliseconds: 650), () {
       if (!mounted) return;
       final now = DateTime.now();
-      final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+      final timeStr =
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
       String responseText;
       String? snippet;
@@ -786,20 +1018,28 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
 
       final lower = userText.toLowerCase();
       if (lower.contains('test') || lower.contains('flutter test')) {
-        responseText = '[$_currentAiModel via Server Terminal]\nExecuted test suite in tmux session:';
-        snippet = '00:03 +14: All tests passed!\n✓ notifications_dismissible_test.dart\n✓ story_wave_bounds_test.dart\n✓ like_toggle_counter_test.dart';
+        responseText =
+            '[$_currentAiModel via Server Terminal]\nExecuted test suite in tmux session:';
+        snippet =
+            '00:03 +14: All tests passed!\n✓ notifications_dismissible_test.dart\n✓ story_wave_bounds_test.dart\n✓ like_toggle_counter_test.dart';
         lang = 'bash';
       } else if (lower.contains('diff') || lower.contains('git')) {
-        responseText = '[$_currentAiModel via Server Terminal]\nGit status across modified modules:';
-        snippet = 'M  lib/screens/home_feed_screen.dart\nM  lib/screens/notifications_screen.dart\nM  lib/screens/chat_screen.dart\nM  lib/screens/individual_chat_screen.dart\nM  lib/widgets/swipe_action_bar.dart';
+        responseText =
+            '[$_currentAiModel via Server Terminal]\nGit status across modified modules:';
+        snippet =
+            'M  lib/screens/home_feed_screen.dart\nM  lib/screens/notifications_screen.dart\nM  lib/screens/chat_screen.dart\nM  lib/screens/individual_chat_screen.dart\nM  lib/widgets/swipe_action_bar.dart';
         lang = 'bash';
-      } else if (lower.contains('analyze') || lower.contains('flutter analyze')) {
-        responseText = '[$_currentAiModel via Server Terminal]\nRunning static analysis...';
+      } else if (lower.contains('analyze') ||
+          lower.contains('flutter analyze')) {
+        responseText =
+            '[$_currentAiModel via Server Terminal]\nRunning static analysis...';
         snippet = 'Analyzing codesnap...\nNo issues found! (ran in 1.2s)';
         lang = 'bash';
       } else {
-        responseText = '[$_currentAiModel via Server Terminal]\nExecuted on remote node. Generated verified patch:';
-        snippet = '// Server terminal execution: \$_currentAiModel\nvoid updateWorkspace() {\n  // Code changes ready to apply\n}';
+        responseText =
+            '[$_currentAiModel via Server Terminal]\nExecuted on remote node. Generated verified patch:';
+        snippet =
+            '// Server terminal execution: \$_currentAiModel\nvoid updateWorkspace() {\n  // Code changes ready to apply\n}';
         lang = 'dart';
       }
 
@@ -836,7 +1076,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.12),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.55), width: 1.2),
+          border: Border.all(
+              color: const Color(0xFF54C5F8).withOpacity(0.55), width: 1.2),
           gradient: LinearGradient(
             colors: [
               const Color(0xFF54C5F8).withOpacity(0.18),
@@ -857,7 +1098,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               onTap: _closeChatSearch,
               child: const Padding(
                 padding: EdgeInsets.all(4),
-                child: Icon(LucideIcons.chevronLeft, size: 22, color: Colors.white),
+                child: Icon(LucideIcons.chevronLeft,
+                    size: 22, color: Colors.white),
               ),
             ),
             const SizedBox(width: 6),
@@ -869,7 +1111,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 cursorColor: const Color(0xFF54C5F8),
                 decoration: InputDecoration(
                   hintText: 'Search word or sentence...',
-                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 13),
+                  hintStyle: TextStyle(
+                      color: Colors.white.withOpacity(0.45), fontSize: 13),
                   border: InputBorder.none,
                   isDense: true,
                 ),
@@ -886,7 +1129,10 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 ),
                 child: Text(
                   '${_currentSearchMatchIndex + 1}/${_matchedMessageIndices.length}',
-                  style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11.5, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      color: Color(0xFF54C5F8),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
               const SizedBox(width: 4),
@@ -894,14 +1140,16 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 onTap: _prevSearchMatch,
                 child: const Padding(
                   padding: EdgeInsets.all(4),
-                  child: Icon(LucideIcons.chevronUp, size: 18, color: Colors.white),
+                  child: Icon(LucideIcons.chevronUp,
+                      size: 18, color: Colors.white),
                 ),
               ),
               SpringButton(
                 onTap: _nextSearchMatch,
                 child: const Padding(
                   padding: EdgeInsets.all(4),
-                  child: Icon(LucideIcons.chevronDown, size: 18, color: Colors.white),
+                  child: Icon(LucideIcons.chevronDown,
+                      size: 18, color: Colors.white),
                 ),
               ),
             ],
@@ -928,7 +1176,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.10),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.45), width: 1.2),
+          border: Border.all(
+              color: const Color(0xFF54C5F8).withOpacity(0.45), width: 1.2),
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -1071,7 +1320,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                         : (msg.text.isNotEmpty ? msg.text : 'Media attachment'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.7), fontSize: 12),
                   ),
                 ],
               ),
@@ -1145,19 +1395,27 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     width: 22,
                     height: 22,
                     decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.08),
+                      color: isSelected
+                          ? const Color(0xFF54C5F8)
+                          : Colors.white.withOpacity(0.08),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: isSelected ? const Color(0xFF54C5F8) : Colors.white30,
+                        color: isSelected
+                            ? const Color(0xFF54C5F8)
+                            : Colors.white30,
                         width: 1.5,
                       ),
                     ),
-                    child: isSelected ? const Icon(LucideIcons.check, size: 14, color: Colors.black) : null,
+                    child: isSelected
+                        ? const Icon(LucideIcons.check,
+                            size: 14, color: Colors.black)
+                        : null,
                   ),
                 ),
                 Expanded(
                   child: Align(
-                    alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                    alignment:
+                        msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
                     child: bubbleWidget,
                   ),
                 ),
@@ -1180,9 +1438,11 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFFFF5252).withOpacity(0.2),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFFF5252).withOpacity(0.6)),
+                  border: Border.all(
+                      color: const Color(0xFFFF5252).withOpacity(0.6)),
                 ),
-                child: const Icon(LucideIcons.trash2, size: 18, color: Color(0xFFFF5252)),
+                child: const Icon(LucideIcons.trash2,
+                    size: 18, color: Color(0xFFFF5252)),
               ),
             ),
             secondaryBackground: Container(
@@ -1193,9 +1453,11 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF54C5F8).withOpacity(0.2),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.6)),
+                  border: Border.all(
+                      color: const Color(0xFF54C5F8).withOpacity(0.6)),
                 ),
-                child: const Icon(LucideIcons.reply, size: 18, color: Color(0xFF54C5F8)),
+                child: const Icon(LucideIcons.reply,
+                    size: 18, color: Color(0xFF54C5F8)),
               ),
             ),
             confirmDismiss: (direction) async {
@@ -1229,7 +1491,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     final isHighlighted = msg.id == _highlightedMessageId;
 
     return Column(
-      crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment:
+          msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -1239,7 +1502,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      isHighlighted ? const Color(0xFFFFD54F).withOpacity(0.35) : Colors.white.withOpacity(0.26),
+                      isHighlighted
+                          ? const Color(0xFFFFD54F).withOpacity(0.35)
+                          : Colors.white.withOpacity(0.26),
                       Colors.white.withOpacity(0.14),
                     ],
                   )
@@ -1247,7 +1512,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      isHighlighted ? const Color(0xFFFFD54F).withOpacity(0.35) : Colors.white.withOpacity(0.14),
+                      isHighlighted
+                          ? const Color(0xFFFFD54F).withOpacity(0.35)
+                          : Colors.white.withOpacity(0.14),
                       Colors.white.withOpacity(0.07),
                     ],
                   ),
@@ -1255,7 +1522,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
             border: Border.all(
               color: isHighlighted
                   ? const Color(0xFFFFD54F)
-                  : (msg.isMe ? Colors.white.withOpacity(0.30) : Colors.white.withOpacity(0.18)),
+                  : (msg.isMe
+                      ? Colors.white.withOpacity(0.30)
+                      : Colors.white.withOpacity(0.18)),
               width: isHighlighted ? 2.2 : 1.1,
             ),
             boxShadow: [
@@ -1280,7 +1549,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               if (msg.replyingTo != null) ...[
                 Container(
                   margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(10),
@@ -1301,10 +1571,13 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        msg.replyingTo!.text.isNotEmpty ? msg.replyingTo!.text : 'Media attachment',
+                        msg.replyingTo!.text.isNotEmpty
+                            ? msg.replyingTo!.text
+                            : 'Media attachment',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11),
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.7), fontSize: 11),
                       ),
                     ],
                   ),
@@ -1328,7 +1601,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF090A10),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35), width: 1.1),
+                    border: Border.all(
+                        color: const Color(0xFF54C5F8).withOpacity(0.35),
+                        width: 1.1),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.35),
@@ -1342,16 +1617,21 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     children: [
                       // Header with language & Copy button
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.06),
-                          borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
-                          border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
+                          borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(11)),
+                          border: Border(
+                              bottom: BorderSide(
+                                  color: Colors.white.withOpacity(0.08))),
                         ),
                         child: Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF54C5F8).withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(6),
@@ -1369,7 +1649,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                             const Spacer(),
                             SpringButton(
                               onTap: () {
-                                Clipboard.setData(ClipboardData(text: msg.codeSnippet!));
+                                Clipboard.setData(
+                                    ClipboardData(text: msg.codeSnippet!));
                                 HapticFeedback.lightImpact();
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
@@ -1381,11 +1662,13 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(LucideIcons.copy, size: 12, color: Colors.white70),
+                                  Icon(LucideIcons.copy,
+                                      size: 12, color: Colors.white70),
                                   SizedBox(width: 4),
                                   Text(
                                     'Copy',
-                                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                                    style: TextStyle(
+                                        color: Colors.white70, fontSize: 11),
                                   ),
                                 ],
                               ),
@@ -1407,11 +1690,15 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       ),
                       // Action buttons: [Apply to File] & [Run in Terminal]
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.03),
-                          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(11)),
-                          border: Border(top: BorderSide(color: Colors.white.withOpacity(0.06))),
+                          borderRadius: const BorderRadius.vertical(
+                              bottom: Radius.circular(11)),
+                          border: Border(
+                              top: BorderSide(
+                                  color: Colors.white.withOpacity(0.06))),
                         ),
                         child: Wrap(
                           spacing: 6,
@@ -1424,29 +1711,42 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                                   SnackBar(
                                     backgroundColor: const Color(0xFF10B981),
                                     behavior: SnackBarBehavior.floating,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(10)),
                                     content: const Text(
                                       '⚡ Changes applied to codebase via remote server bridge!',
-                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12),
                                     ),
                                   ),
                                 );
                               },
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981).withOpacity(0.18),
+                                  color:
+                                      const Color(0xFF10B981).withOpacity(0.18),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
+                                  border: Border.all(
+                                      color: const Color(0xFF10B981)
+                                          .withOpacity(0.5)),
                                 ),
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(LucideIcons.sparkles, size: 11, color: Color(0xFF10B981)),
+                                    Icon(LucideIcons.sparkles,
+                                        size: 11, color: Color(0xFF10B981)),
                                     SizedBox(width: 4),
                                     Text(
                                       'Apply to File',
-                                      style: TextStyle(color: Color(0xFF10B981), fontSize: 10.5, fontWeight: FontWeight.bold),
+                                      style: TextStyle(
+                                          color: Color(0xFF10B981),
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold),
                                     ),
                                   ],
                                 ),
@@ -1456,12 +1756,14 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                               onTap: () {
                                 HapticFeedback.mediumImpact();
                                 final now = DateTime.now();
-                                final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+                                final timeStr =
+                                    '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
                                 setState(() {
                                   widget.conversation.messages.add(
                                     ChatMessage(
                                       id: 'exec_${DateTime.now().millisecondsSinceEpoch}',
-                                      text: '✓ [tmux:0] Command executed successfully with status 0.',
+                                      text:
+                                          '✓ [tmux:0] Command executed successfully with status 0.',
                                       isMe: false,
                                       time: timeStr,
                                       isDelivered: true,
@@ -1471,20 +1773,28 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                                 _scrollToBottom();
                               },
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF54C5F8).withOpacity(0.18),
+                                  color:
+                                      const Color(0xFF54C5F8).withOpacity(0.18),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.5)),
+                                  border: Border.all(
+                                      color: const Color(0xFF54C5F8)
+                                          .withOpacity(0.5)),
                                 ),
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(LucideIcons.play, size: 11, color: Color(0xFF54C5F8)),
+                                    Icon(LucideIcons.play,
+                                        size: 11, color: Color(0xFF54C5F8)),
                                     SizedBox(width: 4),
                                     Text(
                                       'Run in Terminal',
-                                      style: TextStyle(color: Color(0xFF54C5F8), fontSize: 10.5, fontWeight: FontWeight.bold),
+                                      style: TextStyle(
+                                          color: Color(0xFF54C5F8),
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold),
                                     ),
                                   ],
                                 ),
@@ -1507,14 +1817,17 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 children: [
                   Text(
                     msg.time,
-                    style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 10),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.55), fontSize: 10),
                   ),
                   if (msg.isMe) ...[
                     const SizedBox(width: 5),
                     Text(
                       '...',
                       style: TextStyle(
-                        color: msg.isDelivered ? const Color(0xFF54C5F8) : Colors.white38,
+                        color: msg.isDelivered
+                            ? const Color(0xFF54C5F8)
+                            : Colors.white38,
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 1.0,
@@ -1587,7 +1900,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     }
     return RichText(
       text: TextSpan(
-        style: const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.35),
+        style:
+            const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.35),
         children: spans,
       ),
     );
@@ -1609,10 +1923,12 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   }
 
   void _scrollToMessage(String messageId) {
-    final idx = widget.conversation.messages.indexWhere((m) => m.id == messageId);
+    final idx =
+        widget.conversation.messages.indexWhere((m) => m.id == messageId);
     if (idx != -1 && _messagesScrollCtrl.hasClients) {
       final total = widget.conversation.messages.length;
-      final targetOffset = (idx / total) * _messagesScrollCtrl.position.maxScrollExtent;
+      final targetOffset =
+          (idx / total) * _messagesScrollCtrl.position.maxScrollExtent;
       _messagesScrollCtrl.animateTo(
         targetOffset.clamp(0.0, _messagesScrollCtrl.position.maxScrollExtent),
         duration: const Duration(milliseconds: 350),
@@ -1655,7 +1971,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 errorBuilder: (_, __, ___) => Container(
                   height: 140,
                   color: Colors.black26,
-                  child: const Center(child: Icon(LucideIcons.image, color: Colors.white38)),
+                  child: const Center(
+                      child: Icon(LucideIcons.image, color: Colors.white38)),
                 ),
               ),
             if (msg.isUploading)
@@ -1688,7 +2005,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            msg.mediaType == 'video' ? LucideIcons.playCircle : LucideIcons.fileText,
+            msg.mediaType == 'video'
+                ? LucideIcons.playCircle
+                : LucideIcons.fileText,
             color: const Color(0xFF54C5F8),
             size: 24,
           ),
@@ -1699,14 +2018,23 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  msg.mediaCaption ?? (msg.mediaType == 'video' ? 'Video Attachment' : 'Document'),
+                  msg.mediaCaption ??
+                      (msg.mediaType == 'video'
+                          ? 'Video Attachment'
+                          : 'Document'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  msg.mediaType == 'video' ? '0:24 • MP4' : 'PDF Document • 2.4 MB',
-                  style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 10.5),
+                  msg.mediaType == 'video'
+                      ? '0:24 • MP4'
+                      : 'PDF Document • 2.4 MB',
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.6), fontSize: 10.5),
                 ),
               ],
             ),
@@ -1729,7 +2057,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(26),
-                border: Border.all(color: Colors.white.withOpacity(0.22), width: 1.2),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.22), width: 1.2),
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -1752,7 +2081,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     onTap: _showAttachmentOptions,
                     child: Padding(
                       padding: const EdgeInsets.all(6),
-                      child: Icon(LucideIcons.paperclip, size: 20, color: Colors.white.withOpacity(0.85)),
+                      child: Icon(LucideIcons.paperclip,
+                          size: 20, color: Colors.white.withOpacity(0.85)),
                     ),
                   ),
                   SpringButton(
@@ -1761,7 +2091,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(6),
-                      child: Icon(LucideIcons.smile, size: 20, color: Colors.white.withOpacity(0.85)),
+                      child: Icon(LucideIcons.smile,
+                          size: 20, color: Colors.white.withOpacity(0.85)),
                     ),
                   ),
                   const SizedBox(width: 4),
@@ -1772,13 +2103,16 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       cursorColor: const Color(0xFF54C5F8),
                       decoration: InputDecoration(
                         hintText: 'Type a message',
-                        hintStyle: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 14),
+                        hintStyle: TextStyle(
+                            color: Colors.white.withOpacity(0.55),
+                            fontSize: 14),
                         filled: false,
                         fillColor: Colors.transparent,
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 12),
                       ),
                       onSubmitted: (_) => _sendMessage(),
                     ),
@@ -1795,7 +2129,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 ? _sendMessage
                 : () {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Audio note recording started...')),
+                      const SnackBar(
+                          content: Text('Audio note recording started...')),
                     );
                   },
             child: Container(
@@ -1818,7 +2153,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       ),
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: _isTyping ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.25),
+                  color: _isTyping
+                      ? const Color(0xFF54C5F8)
+                      : Colors.white.withOpacity(0.25),
                   width: 1.2,
                 ),
                 boxShadow: [
@@ -1846,7 +2183,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   }
 
   // ── Long-Press Message Reaction & Dropdown / Dropup Liquid Glass Menu ───────
-  void _openMessageActionSheetOnBubble(ChatMessage msg, BuildContext bubbleContext) {
+  void _openMessageActionSheetOnBubble(
+      ChatMessage msg, BuildContext bubbleContext) {
     HapticFeedback.mediumImpact();
     final RenderBox? box = bubbleContext.findRenderObject() as RenderBox?;
     if (box == null) return;
@@ -1870,7 +2208,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     final double bubbleBottom = bubblePos.dy + bubbleSize.height;
 
     final double spaceAboveBubble = bubbleTop - topPadding;
-    final double spaceBelowBubble = screenSize.height - bubbleBottom - bottomPadding;
+    final double spaceBelowBubble =
+        screenSize.height - bubbleBottom - bottomPadding;
 
     // Check if message is "too low" (towards bottom of screen):
     final bool isLow = spaceBelowBubble < (preferredMenuHeight + gap + 16.0) ||
@@ -1890,7 +2229,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
 
       if (menuTop < topPadding + 8.0) {
         menuTop = topPadding + 8.0;
-        maxMenuHeight = (pillTop - gap - menuTop).clamp(120.0, preferredMenuHeight);
+        maxMenuHeight =
+            (pillTop - gap - menuTop).clamp(120.0, preferredMenuHeight);
       }
     } else {
       // ── DROPDOWN: Message is near top/mid -> Drop DOWN below bubble ──
@@ -1898,27 +2238,33 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
         // [Emoji Reaction Pill] -> [Message Bubble] -> [Dropdown Menu]
         pillTop = bubbleTop - pillHeight - gap;
         menuTop = bubbleBottom + gap;
-        final double availableBelowMenu = screenSize.height - menuTop - bottomPadding - 12.0;
+        final double availableBelowMenu =
+            screenSize.height - menuTop - bottomPadding - 12.0;
         maxMenuHeight = availableBelowMenu.clamp(140.0, preferredMenuHeight);
       } else {
         // [Message Bubble] -> [Emoji Reaction Pill] -> [Dropdown Menu]
         pillTop = bubbleBottom + gap;
         menuTop = pillTop + pillHeight + gap;
-        final double availableBelowMenu = screenSize.height - menuTop - bottomPadding - 12.0;
+        final double availableBelowMenu =
+            screenSize.height - menuTop - bottomPadding - 12.0;
         maxMenuHeight = availableBelowMenu.clamp(140.0, preferredMenuHeight);
       }
     }
 
     // Horizontal placement:
-    final double maxPillLeft = math.max(12.0, screenSize.width - pillWidth - 12.0);
-    final double maxMenuLeft = math.max(12.0, screenSize.width - menuWidth - 12.0);
+    final double maxPillLeft =
+        math.max(12.0, screenSize.width - pillWidth - 12.0);
+    final double maxMenuLeft =
+        math.max(12.0, screenSize.width - menuWidth - 12.0);
 
     double pillLeft;
     double menuLeft;
 
     if (msg.isMe) {
-      pillLeft = (bubblePos.dx + bubbleSize.width - pillWidth).clamp(12.0, maxPillLeft);
-      menuLeft = (bubblePos.dx + bubbleSize.width - menuWidth).clamp(12.0, maxMenuLeft);
+      pillLeft = (bubblePos.dx + bubbleSize.width - pillWidth)
+          .clamp(12.0, maxPillLeft);
+      menuLeft = (bubblePos.dx + bubbleSize.width - menuWidth)
+          .clamp(12.0, maxMenuLeft);
     } else {
       pillLeft = bubblePos.dx.clamp(12.0, maxPillLeft);
       menuLeft = bubblePos.dx.clamp(12.0, maxMenuLeft);
@@ -1928,7 +2274,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Dismiss Menu',
-      barrierColor: Colors.transparent, // Completely clear - no dark screen behind
+      barrierColor:
+          Colors.transparent, // Completely clear - no dark screen behind
       transitionDuration: const Duration(milliseconds: 180),
       transitionBuilder: (ctx, anim1, anim2, child) {
         return FadeTransition(
@@ -1986,11 +2333,13 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               child: Material(
                 color: Colors.transparent,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: const Color(0xFF141926).withOpacity(0.70),
                     borderRadius: BorderRadius.circular(26),
-                    border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.28), width: 1.2),
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -2026,10 +2375,13 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                             child: Container(
                               padding: const EdgeInsets.all(4),
                               decoration: BoxDecoration(
-                                color: hasReacted ? const Color(0xFF54C5F8).withOpacity(0.22) : Colors.transparent,
+                                color: hasReacted
+                                    ? const Color(0xFF54C5F8).withOpacity(0.22)
+                                    : Colors.transparent,
                                 shape: BoxShape.circle,
                               ),
-                              child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                              child: Text(emoji,
+                                  style: const TextStyle(fontSize: 22)),
                             ),
                           ),
                         );
@@ -2048,7 +2400,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                               shape: BoxShape.circle,
                               color: Colors.white.withOpacity(0.14),
                             ),
-                            child: const Icon(LucideIcons.plus, size: 16, color: Colors.white),
+                            child: const Icon(LucideIcons.plus,
+                                size: 16, color: Colors.white),
                           ),
                         ),
                       ),
@@ -2069,7 +2422,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF141926).withOpacity(0.70),
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.28), width: 1.2),
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -2120,7 +2474,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                               Navigator.pop(dialogCtx);
                               Clipboard.setData(ClipboardData(text: msg.text));
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Message copied to clipboard')),
+                                const SnackBar(
+                                    content:
+                                        Text('Message copied to clipboard')),
                               );
                             },
                           ),
@@ -2140,17 +2496,18 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                               setState(() => msg.isPinned = !msg.isPinned);
                             },
                           ),
-
                           _buildAnchorMenuItem(
                             icon: LucideIcons.star,
                             title: msg.isStarred ? 'Unstar' : 'Star',
-                            accentColor: msg.isStarred ? const Color(0xFFFFD700) : null,
+                            accentColor:
+                                msg.isStarred ? const Color(0xFFFFD700) : null,
                             onTap: () {
                               Navigator.pop(dialogCtx);
                               setState(() => msg.isStarred = !msg.isStarred);
                             },
                           ),
-                          Divider(color: Colors.white.withOpacity(0.08), height: 1),
+                          Divider(
+                              color: Colors.white.withOpacity(0.08), height: 1),
                           _buildAnchorMenuItem(
                             icon: LucideIcons.checkSquare,
                             title: 'Select',
@@ -2240,11 +2597,17 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 child: Container(
                   width: 38,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white30,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('Message Info', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+              const Text('Message Info',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 14),
               _buildInfoRow('Sent', msg.time),
               _buildInfoRow('Status', 'Delivered & Read (...)'),
@@ -2264,14 +2627,18 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13)),
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(label,
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.6), fontSize: 13)),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
-
-
 
   // ── Three Dots Menu in Top Bar ──────────────────────────────────────────────
   void _openThreeDotsMenu() {
@@ -2292,24 +2659,30 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               Container(
                 width: 36,
                 height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2)),
               ),
               const SizedBox(height: 16),
               _buildSheetActionTile(LucideIcons.user, 'Contact Info', () {
                 Navigator.pop(ctx);
                 _navigateToContactInfo();
               }),
-              _buildSheetActionTile(LucideIcons.image, 'Wallpaper for this Chat', () {
+              _buildSheetActionTile(
+                  LucideIcons.image, 'Wallpaper for this Chat', () {
                 Navigator.pop(ctx);
                 _openWallpaperPickerForThisChat();
               }),
-              _buildSheetActionTile(LucideIcons.search, 'Search in Conversation', () {
+              _buildSheetActionTile(
+                  LucideIcons.search, 'Search in Conversation', () {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Search in conversation active')),
+                  const SnackBar(
+                      content: Text('Search in conversation active')),
                 );
               }),
-              _buildSheetActionTile(LucideIcons.bellOff, 'Mute Notifications', () {
+              _buildSheetActionTile(LucideIcons.bellOff, 'Mute Notifications',
+                  () {
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Notifications muted')),
@@ -2334,7 +2707,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     );
   }
 
-  Widget _buildSheetActionTile(IconData icon, String title, VoidCallback onTap, {bool isDestructive = false}) {
+  Widget _buildSheetActionTile(IconData icon, String title, VoidCallback onTap,
+      {bool isDestructive = false}) {
     return SpringButton(
       onTap: onTap,
       child: Container(
@@ -2342,11 +2716,16 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
         margin: const EdgeInsets.only(bottom: 4),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          color: isDestructive ? const Color(0xFFFF5252).withOpacity(0.08) : Colors.transparent,
+          color: isDestructive
+              ? const Color(0xFFFF5252).withOpacity(0.08)
+              : Colors.transparent,
         ),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: isDestructive ? const Color(0xFFFF5252) : Colors.white70),
+            Icon(icon,
+                size: 18,
+                color:
+                    isDestructive ? const Color(0xFFFF5252) : Colors.white70),
             const SizedBox(width: 14),
             Text(
               title,
@@ -2374,30 +2753,102 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     );
   }
 
-  Widget _buildWallpaperPickerSheet(BuildContext pickerCtx, ChatConversation conv) {
+  Widget _buildWallpaperPickerSheet(
+      BuildContext pickerCtx, ChatConversation conv) {
     final curatedWallpapers = [
-      {'name': 'Cyber Neon', 'url': 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800'},
-      {'name': 'Deep Nebula', 'url': 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=800'},
-      {'name': 'Mountain Mist', 'url': 'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800'},
-      {'name': 'Tokyo Night', 'url': 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800'},
-      {'name': 'Dark Aurora', 'url': 'https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?w=800'},
-      {'name': 'Geometric Glass', 'url': 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800'},
+      {
+        'name': 'Cyber Neon',
+        'url': 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800'
+      },
+      {
+        'name': 'Deep Nebula',
+        'url':
+            'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=800'
+      },
+      {
+        'name': 'Mountain Mist',
+        'url':
+            'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800'
+      },
+      {
+        'name': 'Tokyo Night',
+        'url':
+            'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800'
+      },
+      {
+        'name': 'Dark Aurora',
+        'url':
+            'https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?w=800'
+      },
+      {
+        'name': 'Geometric Glass',
+        'url':
+            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800'
+      },
     ];
 
     final gradients = [
-      {'name': 'Midnight Cyan', 'colors': [const Color(0xFF0F2027), const Color(0xFF203A43), const Color(0xFF2C5364)]},
-      {'name': 'Deep Purple', 'colors': [const Color(0xFF14072B), const Color(0xFF2D0C54), const Color(0xFF0D041A)]},
-      {'name': 'Emerald Dark', 'colors': [const Color(0xFF051911), const Color(0xFF0C3827), const Color(0xFF030D08)]},
-      {'name': 'Sunset Ember', 'colors': [const Color(0xFF2C0B0E), const Color(0xFF4A1521), const Color(0xFF150407)]},
+      {
+        'name': 'Midnight Cyan',
+        'colors': [
+          const Color(0xFF0F2027),
+          const Color(0xFF203A43),
+          const Color(0xFF2C5364)
+        ]
+      },
+      {
+        'name': 'Deep Purple',
+        'colors': [
+          const Color(0xFF14072B),
+          const Color(0xFF2D0C54),
+          const Color(0xFF0D041A)
+        ]
+      },
+      {
+        'name': 'Emerald Dark',
+        'colors': [
+          const Color(0xFF051911),
+          const Color(0xFF0C3827),
+          const Color(0xFF030D08)
+        ]
+      },
+      {
+        'name': 'Sunset Ember',
+        'colors': [
+          const Color(0xFF2C0B0E),
+          const Color(0xFF4A1521),
+          const Color(0xFF150407)
+        ]
+      },
     ];
 
     final solidColors = [
-      {'name': 'Obsidian Void', 'color': const Color(0xFF07080A), 'id': 'obsidian'},
-      {'name': 'OLED Pure Black', 'color': const Color(0xFF000000), 'id': 'oled'},
-      {'name': 'Charcoal Navy', 'color': const Color(0xFF0D1117), 'id': 'charcoal'},
+      {
+        'name': 'Obsidian Void',
+        'color': const Color(0xFF07080A),
+        'id': 'obsidian'
+      },
+      {
+        'name': 'OLED Pure Black',
+        'color': const Color(0xFF000000),
+        'id': 'oled'
+      },
+      {
+        'name': 'Charcoal Navy',
+        'color': const Color(0xFF0D1117),
+        'id': 'charcoal'
+      },
       {'name': 'Deep Slate', 'color': const Color(0xFF11141C), 'id': 'slate'},
-      {'name': 'Gunmetal Gray', 'color': const Color(0xFF16181F), 'id': 'gunmetal'},
-      {'name': 'Night Indigo', 'color': const Color(0xFF0E1020), 'id': 'indigo'},
+      {
+        'name': 'Gunmetal Gray',
+        'color': const Color(0xFF16181F),
+        'id': 'gunmetal'
+      },
+      {
+        'name': 'Night Indigo',
+        'color': const Color(0xFF0E1020),
+        'id': 'indigo'
+      },
     ];
 
     return Container(
@@ -2436,12 +2887,16 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     children: [
                       const Text(
                         'Chat Wallpaper',
-                        style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         'Customizing for ${conv.name}',
-                        style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 12),
+                        style: const TextStyle(
+                            color: Color(0xFF54C5F8), fontSize: 12),
                       ),
                     ],
                   ),
@@ -2453,7 +2908,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                         shape: BoxShape.circle,
                         color: Colors.white.withOpacity(0.08),
                       ),
-                      child: const Icon(LucideIcons.x, size: 18, color: Colors.white70),
+                      child: const Icon(LucideIcons.x,
+                          size: 18, color: Colors.white70),
                     ),
                   ),
                 ],
@@ -2487,11 +2943,13 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                   }
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: const Color(0xFF54C5F8).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+                    border: Border.all(
+                        color: const Color(0xFF54C5F8).withOpacity(0.35)),
                   ),
                   child: Row(
                     children: [
@@ -2501,7 +2959,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                           color: const Color(0xFF54C5F8).withOpacity(0.2),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(LucideIcons.imagePlus, color: Color(0xFF54C5F8), size: 22),
+                        child: const Icon(LucideIcons.imagePlus,
+                            color: Color(0xFF54C5F8), size: 22),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -2510,17 +2969,23 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                           children: [
                             const Text(
                               'Choose Photo from Gallery',
-                              style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               'Adjust size, placement, zoom & dimming',
-                              style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 11.5),
+                              style: TextStyle(
+                                  color: Colors.white.withOpacity(0.65),
+                                  fontSize: 11.5),
                             ),
                           ],
                         ),
                       ),
-                      const Icon(LucideIcons.chevronRight, color: Color(0xFF54C5F8), size: 18),
+                      const Icon(LucideIcons.chevronRight,
+                          color: Color(0xFF54C5F8), size: 18),
                     ],
                   ),
                 ),
@@ -2534,11 +2999,14 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     widget.onWallpaperUpdated?.call(null);
                     Navigator.pop(pickerCtx);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Reset wallpaper for ${conv.name} to default')),
+                      SnackBar(
+                          content: Text(
+                              'Reset wallpaper for ${conv.name} to default')),
                     );
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.06),
                       borderRadius: BorderRadius.circular(12),
@@ -2547,9 +3015,13 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(LucideIcons.rotateCcw, size: 15, color: Colors.white70),
+                        const Icon(LucideIcons.rotateCcw,
+                            size: 15, color: Colors.white70),
                         const SizedBox(width: 8),
-                        Text('Reset to Default Wallpaper', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12.5)),
+                        Text('Reset to Default Wallpaper',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 12.5)),
                       ],
                     ),
                   ),
@@ -2557,7 +3029,11 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               ],
 
               const SizedBox(height: 20),
-              const Text('Curated Art & Photos', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
+              const Text('Curated Art & Photos',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               GridView.builder(
                 shrinkWrap: true,
@@ -2596,7 +3072,10 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                               gradient: LinearGradient(
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
-                                colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withOpacity(0.8)
+                                ],
                               ),
                             ),
                           ),
@@ -2608,7 +3087,10 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                               wp['name']!,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ),
                         ],
@@ -2619,7 +3101,11 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               ),
 
               const SizedBox(height: 20),
-              const Text('Minimalist Gradients', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
+              const Text('Minimalist Gradients',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               GridView.builder(
                 shrinkWrap: true,
@@ -2650,13 +3136,17 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       decoration: BoxDecoration(
                         gradient: LinearGradient(colors: colors),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withOpacity(0.18)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.18)),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Center(
                         child: Text(
                           g['name'] as String,
-                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600),
                         ),
                       ),
                     ),
@@ -2665,7 +3155,11 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
               ),
 
               const SizedBox(height: 20),
-              const Text('Solid Minimalist Darks', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
+              const Text('Solid Minimalist Darks',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               GridView.builder(
                 shrinkWrap: true,
@@ -2696,13 +3190,17 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       decoration: BoxDecoration(
                         color: color,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.15)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.15)),
                       ),
                       child: Center(
                         child: Text(
                           s['name'] as String,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w500),
+                          style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w500),
                         ),
                       ),
                     ),
@@ -2765,7 +3263,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 child: Container(
                   width: 36,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 18),
@@ -2813,21 +3313,26 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: const Color(0xFF54C5F8).withOpacity(0.15),
-              border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+              border:
+                  Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
             ),
             child: Icon(icon, size: 20, color: const Color(0xFF54C5F8)),
           ),
           const SizedBox(height: 7),
           Text(
             label,
-            style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _pickFromStorage({String mediaType = 'image', bool isCamera = false}) async {
+  Future<void> _pickFromStorage(
+      {String mediaType = 'image', bool isCamera = false}) async {
     try {
       PickedMediaResult? result;
       if (isCamera) {
@@ -2877,6 +3382,7 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
             _sendMediaMessage(
               mediaType: type,
               mediaUrl: url,
+              fileName: mediaTitle,
               caption: caption,
             );
           },
@@ -2897,14 +3403,16 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
       builder: (ctx) {
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 340),
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
               color: const Color(0xFF141926).withOpacity(0.82),
               borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white.withOpacity(0.24), width: 1.2),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.24), width: 1.2),
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
@@ -2933,9 +3441,11 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF5252).withOpacity(0.16),
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFFF5252).withOpacity(0.35)),
+                    border: Border.all(
+                        color: const Color(0xFFFF5252).withOpacity(0.35)),
                   ),
-                  child: const Icon(LucideIcons.trash2, size: 24, color: Color(0xFFFF5252)),
+                  child: const Icon(LucideIcons.trash2,
+                      size: 24, color: Color(0xFFFF5252)),
                 ),
                 const SizedBox(height: 14),
                 const Text(
@@ -2974,7 +3484,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       Navigator.pop(ctx);
                       setState(() => widget.conversation.messages.remove(msg));
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Message deleted for everyone')),
+                        const SnackBar(
+                            content: Text('Message deleted for everyone')),
                       );
                     },
                   ),
@@ -2985,7 +3496,9 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 _buildGlassDeleteBtn(
                   title: 'Delete for me',
                   icon: LucideIcons.trash,
-                  color: canDeleteForEveryone ? Colors.white.withOpacity(0.9) : const Color(0xFFFF5252),
+                  color: canDeleteForEveryone
+                      ? Colors.white.withOpacity(0.9)
+                      : const Color(0xFFFF5252),
                   isPrimary: !canDeleteForEveryone,
                   onTap: () {
                     Navigator.pop(ctx);
@@ -3026,10 +3539,14 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: isPrimary ? color.withOpacity(0.18) : Colors.white.withOpacity(0.08),
+          color: isPrimary
+              ? color.withOpacity(0.18)
+              : Colors.white.withOpacity(0.08),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isPrimary ? color.withOpacity(0.55) : Colors.white.withOpacity(0.20),
+            color: isPrimary
+                ? color.withOpacity(0.55)
+                : Colors.white.withOpacity(0.20),
             width: 1.1,
           ),
           boxShadow: isPrimary
@@ -3063,11 +3580,12 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
   }
 
   void _starSelectedMessages() {
+    final changed = widget.conversation.messages
+        .where((message) => _selectedMessageIds.contains(message.id))
+        .toList(growable: false);
     setState(() {
-      for (final msg in widget.conversation.messages) {
-        if (_selectedMessageIds.contains(msg.id)) {
-          msg.isStarred = true;
-        }
+      for (final msg in changed) {
+        msg.isStarred = true;
       }
       _isMultiSelectMode = false;
       _selectedMessageIds.clear();
@@ -3075,10 +3593,22 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Messages starred')),
     );
+    for (final message in changed) {
+      if (message.id.startsWith('msg_') || message.id.startsWith('media_')) {
+        continue;
+      }
+      ChatService.setMessageFlags(
+        messageId: message.id,
+        isStarred: true,
+        isPinned: message.isPinned,
+      );
+    }
   }
 
   void _copySelectedMessages() {
-    final selectedMsgs = widget.conversation.messages.where((m) => _selectedMessageIds.contains(m.id)).toList();
+    final selectedMsgs = widget.conversation.messages
+        .where((m) => _selectedMessageIds.contains(m.id))
+        .toList();
     final combined = selectedMsgs.map((m) => m.text).join('\n');
     Clipboard.setData(ClipboardData(text: combined));
     setState(() {
@@ -3106,7 +3636,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 .where((c) {
               if (searchQuery.isEmpty) return true;
               final q = searchQuery.toLowerCase();
-              return c.name.toLowerCase().contains(q) || c.role.toLowerCase().contains(q);
+              return c.name.toLowerCase().contains(q) ||
+                  c.role.toLowerCase().contains(q);
             }).toList();
 
             return BackdropFilter(
@@ -3118,7 +3649,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0C0E17).withOpacity(0.96),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
                   border: Border.all(color: Colors.white.withOpacity(0.18)),
                 ),
                 child: SafeArea(
@@ -3138,7 +3670,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                       const SizedBox(height: 14),
                       Row(
                         children: [
-                          const Icon(LucideIcons.forward, color: Color(0xFF54C5F8), size: 18),
+                          const Icon(LucideIcons.forward,
+                              color: Color(0xFF54C5F8), size: 18),
                           const SizedBox(width: 8),
                           Text(
                             messagesToForward.length == 1
@@ -3159,18 +3692,21 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.07),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white.withOpacity(0.12)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.12)),
                         ),
                         child: Row(
                           children: [
-                            const Icon(LucideIcons.search, size: 16, color: Colors.white54),
+                            const Icon(LucideIcons.search,
+                                size: 16, color: Colors.white54),
                             const SizedBox(width: 8),
                             Expanded(
                               child: TextField(
                                 onChanged: (val) {
                                   setSheetState(() => searchQuery = val.trim());
                                 },
-                                style: const TextStyle(color: Colors.white, fontSize: 13),
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 13),
                                 cursorColor: const Color(0xFF54C5F8),
                                 decoration: InputDecoration(
                                   hintText: 'Search contacts or connections...',
@@ -3201,26 +3737,32 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                             : ListView.separated(
                                 physics: const BouncingScrollPhysics(),
                                 itemCount: candidates.length,
-                                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 8),
                                 itemBuilder: (context, i) {
                                   final conn = candidates[i];
                                   return Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 8),
                                     decoration: BoxDecoration(
                                       color: Colors.white.withOpacity(0.05),
                                       borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(color: Colors.white.withOpacity(0.08)),
+                                      border: Border.all(
+                                          color:
+                                              Colors.white.withOpacity(0.08)),
                                     ),
                                     child: Row(
                                       children: [
                                         CircleAvatar(
                                           radius: 18,
-                                          backgroundImage: NetworkImage(conn.avatarUrl),
+                                          backgroundImage:
+                                              NetworkImage(conn.avatarUrl),
                                         ),
                                         const SizedBox(width: 12),
                                         Expanded(
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               Text(
                                                 conn.name,
@@ -3233,7 +3775,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                                               Text(
                                                 conn.role,
                                                 style: TextStyle(
-                                                  color: Colors.white.withOpacity(0.5),
+                                                  color: Colors.white
+                                                      .withOpacity(0.5),
                                                   fontSize: 11,
                                                 ),
                                               ),
@@ -3257,8 +3800,12 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                                                 ),
                                               );
                                             }
-                                            final lastOne = messagesToForward.last;
-                                            conn.lastMessage = lastOne.mediaCaption?.isNotEmpty == true
+                                            final lastOne =
+                                                messagesToForward.last;
+                                            conn.lastMessage = lastOne
+                                                        .mediaCaption
+                                                        ?.isNotEmpty ==
+                                                    true
                                                 ? lastOne.mediaCaption!
                                                 : (lastOne.text.isNotEmpty
                                                     ? lastOne.text
@@ -3271,7 +3818,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                                                 _selectedMessageIds.clear();
                                               });
                                             }
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
                                               SnackBar(
                                                 content: Text(
                                                   messagesToForward.length == 1
@@ -3282,16 +3830,23 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                                             );
                                           },
                                           child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 14, vertical: 7),
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFF54C5F8).withOpacity(0.20),
-                                              borderRadius: BorderRadius.circular(10),
-                                              border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.6)),
+                                              color: const Color(0xFF54C5F8)
+                                                  .withOpacity(0.20),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                              border: Border.all(
+                                                  color: const Color(0xFF54C5F8)
+                                                      .withOpacity(0.6)),
                                             ),
                                             child: const Row(
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                Icon(LucideIcons.send, color: Color(0xFF54C5F8), size: 13),
+                                                Icon(LucideIcons.send,
+                                                    color: Color(0xFF54C5F8),
+                                                    size: 13),
                                                 SizedBox(width: 6),
                                                 Text(
                                                   'Send',
@@ -3347,7 +3902,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
           decoration: BoxDecoration(
             color: const Color(0xFF141926).withOpacity(0.82),
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.white.withOpacity(0.24), width: 1.2),
+            border:
+                Border.all(color: Colors.white.withOpacity(0.24), width: 1.2),
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -3376,20 +3932,28 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFFFF5252).withOpacity(0.16),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFFF5252).withOpacity(0.35)),
+                  border: Border.all(
+                      color: const Color(0xFFFF5252).withOpacity(0.35)),
                 ),
-                child: const Icon(LucideIcons.trash2, size: 24, color: Color(0xFFFF5252)),
+                child: const Icon(LucideIcons.trash2,
+                    size: 24, color: Color(0xFFFF5252)),
               ),
               const SizedBox(height: 14),
               Text(
                 'Delete $count Messages?',
-                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Text(
                 'Are you sure you want to delete $count selected messages from your chat?',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 13, height: 1.35),
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.70),
+                    fontSize: 13,
+                    height: 1.35),
               ),
               const SizedBox(height: 20),
               _buildGlassDeleteBtn(
@@ -3400,7 +3964,8 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                 onTap: () {
                   Navigator.pop(ctx);
                   setState(() {
-                    widget.conversation.messages.removeWhere((m) => _selectedMessageIds.contains(m.id));
+                    widget.conversation.messages
+                        .removeWhere((m) => _selectedMessageIds.contains(m.id));
                     _isMultiSelectMode = false;
                     _selectedMessageIds.clear();
                   });
@@ -3474,11 +4039,13 @@ Widget buildWallpaperBackground(ChatWallpaperConfig wallpaper) {
         ),
         if (wallpaper.blur > 0.1)
           BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: wallpaper.blur, sigmaY: wallpaper.blur),
+            filter: ImageFilter.blur(
+                sigmaX: wallpaper.blur, sigmaY: wallpaper.blur),
             child: const SizedBox.expand(),
           ),
         Container(
-          color: Colors.black.withOpacity((1.0 - wallpaper.opacity).clamp(0.0, 0.95)),
+          color: Colors.black
+              .withOpacity((1.0 - wallpaper.opacity).clamp(0.0, 0.95)),
         ),
       ],
     );
@@ -3538,7 +4105,8 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final isImageType = widget.wallpaper.type == 'image' && widget.wallpaper.imageUrl != null;
+    final isImageType =
+        widget.wallpaper.type == 'image' && widget.wallpaper.imageUrl != null;
     final draftConfig = widget.wallpaper.copyWith(
       blur: _blur,
       opacity: _opacity,
@@ -3568,7 +4136,9 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                 child: Container(
                   width: 40,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 12),
@@ -3580,15 +4150,21 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.isForContacts ? 'Contacts Wallpaper' : 'Chat Wallpaper',
-                        style: const TextStyle(color: Colors.white, fontSize: 16.5, fontWeight: FontWeight.bold),
+                        widget.isForContacts
+                            ? 'Contacts Wallpaper'
+                            : 'Chat Wallpaper',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         widget.isForContacts
                             ? 'Customizing Contacts List Background'
                             : 'Customizing for ${widget.conv?.name ?? 'Chat'}',
-                        style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11.5),
+                        style: const TextStyle(
+                            color: Color(0xFF54C5F8), fontSize: 11.5),
                       ),
                     ],
                   ),
@@ -3596,8 +4172,11 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                     onTap: () => Navigator.pop(context),
                     child: Container(
                       padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.08)),
-                      child: const Icon(LucideIcons.x, size: 16, color: Colors.white70),
+                      decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withOpacity(0.08)),
+                      child: const Icon(LucideIcons.x,
+                          size: 16, color: Colors.white70),
                     ),
                   ),
                 ],
@@ -3622,8 +4201,12 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                         onPanUpdate: isImageType
                             ? (details) {
                                 setState(() {
-                                  _alignmentX = (_alignmentX + details.delta.dx / 100).clamp(-1.5, 1.5);
-                                  _alignmentY = (_alignmentY + details.delta.dy / 100).clamp(-1.5, 1.5);
+                                  _alignmentX =
+                                      (_alignmentX + details.delta.dx / 100)
+                                          .clamp(-1.5, 1.5);
+                                  _alignmentY =
+                                      (_alignmentY + details.delta.dy / 100)
+                                          .clamp(-1.5, 1.5);
                                 });
                               }
                             : null,
@@ -3634,49 +4217,67 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                       Center(
                         child: widget.isForContacts
                             ? Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 20),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 20),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 10),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.12),
                                   borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: Colors.white.withOpacity(0.22)),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.22)),
                                 ),
                                 child: Row(
                                   children: [
                                     const CircleAvatar(
                                       radius: 18,
-                                      backgroundImage: NetworkImage('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'),
+                                      backgroundImage: NetworkImage(
+                                          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'),
                                     ),
                                     const SizedBox(width: 10),
                                     const Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text('Mohit Bro Bihar', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                                          Text('Fullstack Dev • Online', style: TextStyle(color: Color(0xFF54C5F8), fontSize: 10.5)),
+                                          Text('Mohit Bro Bihar',
+                                              style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold)),
+                                          Text('Fullstack Dev • Online',
+                                              style: TextStyle(
+                                                  color: Color(0xFF54C5F8),
+                                                  fontSize: 10.5)),
                                         ],
                                       ),
                                     ),
                                     Container(
                                       width: 8,
                                       height: 8,
-                                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF4ADE80)),
+                                      decoration: const BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Color(0xFF4ADE80)),
                                     ),
                                   ],
                                 ),
                               )
                             : Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                margin: const EdgeInsets.symmetric(horizontal: 24),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 10),
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 24),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.18),
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: Colors.white.withOpacity(0.28)),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.28)),
                                 ),
                                 child: const Text(
                                   'Clean liquid glass! Wallpaper preview 🔥',
-                                  style: TextStyle(color: Colors.white, fontSize: 12),
+                                  style: TextStyle(
+                                      color: Colors.white, fontSize: 12),
                                 ),
                               ),
                       ),
@@ -3701,14 +4302,18 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 7),
                             decoration: BoxDecoration(
-                              color: _activeTab == 0 ? const Color(0xFF54C5F8) : Colors.transparent,
+                              color: _activeTab == 0
+                                  ? const Color(0xFF54C5F8)
+                                  : Colors.transparent,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Center(
                               child: Text(
                                 'Size & Placement',
                                 style: TextStyle(
-                                  color: _activeTab == 0 ? Colors.black : Colors.white70,
+                                  color: _activeTab == 0
+                                      ? Colors.black
+                                      : Colors.white70,
                                   fontSize: 11.5,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -3723,14 +4328,18 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 7),
                             decoration: BoxDecoration(
-                              color: _activeTab == 1 ? const Color(0xFF54C5F8) : Colors.transparent,
+                              color: _activeTab == 1
+                                  ? const Color(0xFF54C5F8)
+                                  : Colors.transparent,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Center(
                               child: Text(
                                 'Dimming & Blur',
                                 style: TextStyle(
-                                  color: _activeTab == 1 ? Colors.black : Colors.white70,
+                                  color: _activeTab == 1
+                                      ? Colors.black
+                                      : Colors.white70,
                                   fontSize: 11.5,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -3743,13 +4352,20 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                   ),
                 ),
                 const SizedBox(height: 12),
-
                 if (_activeTab == 0) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Wallpaper Size (Zoom)', style: TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
-                      Text('${(_scale * 100).toInt()}%', style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      const Text('Wallpaper Size (Zoom)',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600)),
+                      Text('${(_scale * 100).toInt()}%',
+                          style: const TextStyle(
+                              color: Color(0xFF54C5F8),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold)),
                     ],
                   ),
                   Slider(
@@ -3762,21 +4378,41 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      _buildNudgeBtn(LucideIcons.arrowLeft, () => setState(() => _alignmentX = (_alignmentX - 0.1).clamp(-1.5, 1.5))),
+                      _buildNudgeBtn(
+                          LucideIcons.arrowLeft,
+                          () => setState(() => _alignmentX =
+                              (_alignmentX - 0.1).clamp(-1.5, 1.5))),
                       const SizedBox(width: 8),
-                      _buildNudgeBtn(LucideIcons.arrowUp, () => setState(() => _alignmentY = (_alignmentY - 0.1).clamp(-1.5, 1.5))),
+                      _buildNudgeBtn(
+                          LucideIcons.arrowUp,
+                          () => setState(() => _alignmentY =
+                              (_alignmentY - 0.1).clamp(-1.5, 1.5))),
                       const SizedBox(width: 8),
-                      _buildNudgeBtn(LucideIcons.arrowDown, () => setState(() => _alignmentY = (_alignmentY + 0.1).clamp(-1.5, 1.5))),
+                      _buildNudgeBtn(
+                          LucideIcons.arrowDown,
+                          () => setState(() => _alignmentY =
+                              (_alignmentY + 0.1).clamp(-1.5, 1.5))),
                       const SizedBox(width: 8),
-                      _buildNudgeBtn(LucideIcons.arrowRight, () => setState(() => _alignmentX = (_alignmentX + 0.1).clamp(-1.5, 1.5))),
+                      _buildNudgeBtn(
+                          LucideIcons.arrowRight,
+                          () => setState(() => _alignmentX =
+                              (_alignmentX + 0.1).clamp(-1.5, 1.5))),
                     ],
                   ),
                 ] else ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Wallpaper Brightness', style: TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
-                      Text('${(_opacity * 100).toInt()}%', style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      const Text('Wallpaper Brightness',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600)),
+                      Text('${(_opacity * 100).toInt()}%',
+                          style: const TextStyle(
+                              color: Color(0xFF54C5F8),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold)),
                     ],
                   ),
                   Slider(
@@ -3789,8 +4425,16 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Frosted Blur (Optional)', style: TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w600)),
-                      Text('${_blur.toStringAsFixed(1)} px', style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      const Text('Frosted Blur (Optional)',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600)),
+                      Text('${_blur.toStringAsFixed(1)} px',
+                          style: const TextStyle(
+                              color: Color(0xFF54C5F8),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold)),
                     ],
                   ),
                   Slider(
@@ -3829,7 +4473,10 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                       widget.isForContacts
                           ? 'Apply to Contacts List'
                           : 'Apply to ${widget.conv?.name ?? 'Chat'}',
-                      style: const TextStyle(color: Colors.black, fontSize: 14.5, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          color: Colors.black,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
@@ -3857,7 +4504,9 @@ class _WallpaperAdjustSheetState extends State<WallpaperAdjustSheet> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Center(
-                      child: Text('Set for all chats', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                      child: Text('Set for all chats',
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 12.5)),
                     ),
                   ),
                 ),
@@ -3892,7 +4541,8 @@ class MediaEditorSheet extends StatefulWidget {
   final String mediaUrl;
   final String mediaTitle;
   final String? initialCaption;
-  final Function(String type, String url, String? caption, String filterName) onSend;
+  final Function(String type, String url, String? caption, String filterName)
+      onSend;
 
   const MediaEditorSheet({
     super.key,
@@ -3920,7 +4570,13 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
     'Noir Mono': const ColorFilter.mode(Colors.black, BlendMode.saturation),
   };
 
-  final List<String> _badges = ['🔥 Fire', '🚀 Launch', '✨ Clean', '🐞 Bug', '✅ Fixed'];
+  final List<String> _badges = [
+    '🔥 Fire',
+    '🚀 Launch',
+    '✨ Clean',
+    '🐞 Bug',
+    '✅ Fixed'
+  ];
 
   @override
   void initState() {
@@ -3951,7 +4607,8 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
           Container(
             width: 38,
             height: 4,
-            decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(2)),
+            decoration: BoxDecoration(
+                color: Colors.white30, borderRadius: BorderRadius.circular(2)),
           ),
           const SizedBox(height: 12),
 
@@ -3965,14 +4622,20 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
                     : widget.mediaType == 'video'
                         ? 'Video Preview'
                         : 'Document Preview',
-                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold),
               ),
               SpringButton(
                 onTap: () => Navigator.pop(context),
                 child: Container(
                   padding: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.08)),
-                  child: const Icon(LucideIcons.x, size: 16, color: Colors.white70),
+                  decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.08)),
+                  child: const Icon(LucideIcons.x,
+                      size: 16, color: Colors.white70),
                 ),
               ),
             ],
@@ -3988,15 +4651,21 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
                 fit: StackFit.expand,
                 children: [
                   ColorFiltered(
-                    colorFilter: _filters[_selectedFilter] ?? const ColorFilter.mode(Colors.transparent, BlendMode.multiply),
+                    colorFilter: _filters[_selectedFilter] ??
+                        const ColorFilter.mode(
+                            Colors.transparent, BlendMode.multiply),
                     child: widget.mediaUrl.startsWith('data:image')
-                        ? Image.memory(base64Decode(widget.mediaUrl.split(',').last), fit: BoxFit.cover)
+                        ? Image.memory(
+                            base64Decode(widget.mediaUrl.split(',').last),
+                            fit: BoxFit.cover)
                         : Image.network(
                             widget.mediaUrl,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => Container(
                               color: Colors.black26,
-                              child: const Center(child: Icon(LucideIcons.image, size: 48, color: Colors.white38)),
+                              child: const Center(
+                                  child: Icon(LucideIcons.image,
+                                      size: 48, color: Colors.white38)),
                             ),
                           ),
                   ),
@@ -4005,13 +4674,19 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
                       top: 14,
                       right: 14,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.75),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFF54C5F8), width: 1.2),
+                          border: Border.all(
+                              color: const Color(0xFF54C5F8), width: 1.2),
                         ),
-                        child: Text(_selectedBadge!, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                        child: Text(_selectedBadge!,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold)),
                       ),
                     ),
                 ],
@@ -4033,20 +4708,28 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
                     child: SpringButton(
                       onTap: () => setState(() => _selectedFilter = fName),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFF54C5F8).withOpacity(0.2) : Colors.white.withOpacity(0.06),
+                          color: isSelected
+                              ? const Color(0xFF54C5F8).withOpacity(0.2)
+                              : Colors.white.withOpacity(0.06),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: isSelected ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.15),
+                            color: isSelected
+                                ? const Color(0xFF54C5F8)
+                                : Colors.white.withOpacity(0.15),
                           ),
                         ),
                         child: Text(
                           fName,
                           style: TextStyle(
-                            color: isSelected ? const Color(0xFF54C5F8) : Colors.white70,
+                            color: isSelected
+                                ? const Color(0xFF54C5F8)
+                                : Colors.white70,
                             fontSize: 11,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            fontWeight:
+                                isSelected ? FontWeight.bold : FontWeight.w500,
                           ),
                         ),
                       ),
@@ -4068,22 +4751,31 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: SpringButton(
-                    onTap: () => setState(() => _selectedBadge = isSelected ? null : bName),
+                    onTap: () => setState(
+                        () => _selectedBadge = isSelected ? null : bName),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFF54C5F8).withOpacity(0.2) : Colors.white.withOpacity(0.06),
+                        color: isSelected
+                            ? const Color(0xFF54C5F8).withOpacity(0.2)
+                            : Colors.white.withOpacity(0.06),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: isSelected ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.12),
+                          color: isSelected
+                              ? const Color(0xFF54C5F8)
+                              : Colors.white.withOpacity(0.12),
                         ),
                       ),
                       child: Text(
                         bName,
                         style: TextStyle(
-                          color: isSelected ? const Color(0xFF54C5F8) : Colors.white70,
+                          color: isSelected
+                              ? const Color(0xFF54C5F8)
+                              : Colors.white70,
                           fontSize: 11,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
                         ),
                       ),
                     ),
@@ -4112,7 +4804,8 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
                     cursorColor: const Color(0xFF54C5F8),
                     decoration: InputDecoration(
                       hintText: 'Add a caption...',
-                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+                      hintStyle:
+                          TextStyle(color: Colors.white.withOpacity(0.5)),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(vertical: 12),
                     ),
@@ -4126,7 +4819,9 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
                   widget.onSend(
                     widget.mediaType,
                     widget.mediaUrl,
-                    _captionCtrl.text.trim().isEmpty ? null : _captionCtrl.text.trim(),
+                    _captionCtrl.text.trim().isEmpty
+                        ? null
+                        : _captionCtrl.text.trim(),
                     _selectedFilter,
                   );
                 },
@@ -4138,7 +4833,8 @@ class _MediaEditorSheetState extends State<MediaEditorSheet> {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(LucideIcons.send, color: Colors.black, size: 20),
+                    child:
+                        Icon(LucideIcons.send, color: Colors.black, size: 20),
                   ),
                 ),
               ),

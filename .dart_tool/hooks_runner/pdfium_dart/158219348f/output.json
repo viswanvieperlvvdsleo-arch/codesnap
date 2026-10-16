@@ -1,0 +1,17 @@
+{
+  "assets": [
+    {
+      "encoding": {
+        "file": "C:\\codesnap\\.dart_tool\\hooks_runner\\shared\\pdfium_dart\\build\\chromium_7811\\win-x64\\pdfium.dll",
+        "id": "package:pdfium_dart/libpdfium",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    }
+  ],
+  "assets_for_linking": {},
+  "status": "success",
+  "timestamp": "2026-10-12 23:17:03.000"
+}

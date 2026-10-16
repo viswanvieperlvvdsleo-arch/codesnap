@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
@@ -7,7 +8,6 @@ import '../providers/theme_provider.dart';
 import '../utils/feed_mock_data.dart';
 import '../utils/app_animations.dart';
 import '../widgets/morphing_capsule.dart';
-import '../widgets/elastic_scroll_view.dart';
 import '../widgets/swipe_action_bar.dart';
 import '../widgets/interactive_bottom_cards.dart';
 import '../widgets/floating_action_bar.dart' as quick_actions;
@@ -15,7 +15,6 @@ import '../widgets/spring_button.dart';
 import '../screens/story_viewer_screen.dart';
 import '../screens/full_screen_reels_screen.dart';
 import '../screens/user_profile_detail_screen.dart';
-import '../utils/mock_data.dart';
 import '../services/storage_picker.dart';
 import '../services/saved_posts_manager.dart';
 import 'package:provider/provider.dart';
@@ -23,9 +22,11 @@ import '../providers/auth_provider.dart';
 import '../models/user.dart';
 import 'chat_screen.dart';
 import 'create_post_studio_screen.dart';
+import 'people_profile_detail_screen.dart';
 import '../services/supabase_data_service.dart';
 import '../services/local_posts_cache.dart';
 import '../services/supabase_service.dart';
+import '../services/realtime_sync_service.dart';
 
 class HomeFeedScreen extends StatefulWidget {
   const HomeFeedScreen({super.key});
@@ -76,6 +77,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   bool _coveredPostShowsComments = false;
 
   final ValueNotifier<double> _scrollNotifier = ValueNotifier(0.0);
+  VoidCallback? _stopRealtime;
+  Timer? _realtimeRefreshTimer;
 
   // Per-post animation controllers for staggered entrance
   List<AnimationController> _postControllers = [];
@@ -126,6 +129,18 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
     _reinitPostControllers();
     _loadSupabasePosts();
     _loadSupabaseStories();
+    _stopRealtime = RealtimeSyncService.instance.subscribe(
+      const {'posts', 'post_likes', 'comments', 'stories', 'followers'},
+      (_) {
+        _realtimeRefreshTimer?.cancel();
+        _realtimeRefreshTimer = Timer(const Duration(milliseconds: 250), () {
+          if (!mounted) return;
+          _loadUserLikes();
+          _loadSupabasePosts();
+          _loadSupabaseStories();
+        });
+      },
+    );
   }
 
   Future<void> _loadUserLikes() async {
@@ -243,6 +258,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
         remotePosts.add(
           FeedPost(
             id: p['id'].toString(),
+            ownerId: p['user_id']?.toString(),
             username: uname,
             location: 'Tokyo Cloud',
             avatarUrl: avatar,
@@ -322,6 +338,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   }) {
     return FeedPost(
       id: id,
+      ownerId: post.ownerId,
       username: post.username,
       location: post.location,
       avatarUrl: post.avatarUrl,
@@ -346,7 +363,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
     try {
       final auth = Provider.of<AuthProvider>(context, listen: false);
       final currentUser = auth.currentUser;
-      final myAvatar = (currentUser?.avatarUrl?.isNotEmpty == true)
+      final currentSupabaseUserId = SupabaseService.currentUserId;
+      final myAvatar = (currentUser?.avatarUrl.isNotEmpty == true)
           ? currentUser!.avatarUrl
           : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500';
 
@@ -363,13 +381,15 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
       if (!mounted) return;
       if (supaStories.isEmpty) {
         setState(() {
+          _myStoryItems.clear();
           _stories.clear();
           _stories.add(myStoryCard!);
         });
         return;
       }
 
-      final List<FeedStory> remoteStories = [];
+      final myRemoteItems = <FeedStoryItem>[];
+      final remoteStoriesByUser = <String, FeedStory>{};
       for (final s in supaStories) {
         final profile = s['profiles'] as Map<String, dynamic>?;
         final uname = profile?['username'] ?? 'developer';
@@ -379,29 +399,39 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500';
         final title = s['title'] as String? ?? 'Story';
 
-        remoteStories.add(
-          FeedStory(
-            id: s['id'].toString(),
+        final item = FeedStoryItem(
+          id: 'item_${s['id']}',
+          imageUrl: media,
+          caption: title,
+          time: 'Recent',
+        );
+        final storyUserId = s['user_id']?.toString() ?? '';
+        if (storyUserId == currentSupabaseUserId) {
+          myRemoteItems.insert(0, item);
+          continue;
+        }
+
+        final card = remoteStoriesByUser.putIfAbsent(
+          storyUserId,
+          () => FeedStory(
+            id: storyUserId.isEmpty ? s['id'].toString() : storyUserId,
             username: uname,
             imageUrl: avatar,
             timeAgo: 'Recent',
-            items: [
-              FeedStoryItem(
-                id: 'item_${s['id']}',
-                imageUrl: media,
-                caption: title,
-                time: 'Recent',
-              ),
-            ],
+            items: <FeedStoryItem>[],
           ),
         );
+        card.items.insert(0, item);
       }
 
       if (mounted) {
         setState(() {
+          _myStoryItems
+            ..clear()
+            ..addAll(myRemoteItems);
           _stories.clear();
           _stories.add(myStoryCard!);
-          _stories.addAll(remoteStories);
+          _stories.addAll(remoteStoriesByUser.values);
         });
       }
     } catch (e) {
@@ -416,6 +446,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
 
   @override
   void dispose() {
+    _stopRealtime?.call();
+    _realtimeRefreshTimer?.cancel();
     _scrollNotifier.dispose();
     _scrollController.dispose();
     for (final c in _postControllers) c.dispose();
@@ -455,6 +487,20 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
   }
 
   void _openUserProfile(FeedPost post) {
+    final ownerId = post.ownerId;
+    if (ownerId != null && ownerId.isNotEmpty) {
+      Navigator.of(context).push(PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 320),
+        reverseTransitionDuration: const Duration(milliseconds: 280),
+        pageBuilder: (_, animation, __) =>
+            PeopleProfileDetailScreen(userId: ownerId),
+        transitionsBuilder: (_, animation, __, child) => FadeTransition(
+          opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+          child: child,
+        ),
+      ));
+      return;
+    }
     final user = User(
       id: post.id,
       name: post.username,
@@ -2161,7 +2207,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             final String myUname = (user?.section?.isNotEmpty == true)
                 ? user!.section!
                 : (user?.name ?? 'You');
-            final myAvatar = (user?.avatarUrl?.isNotEmpty == true)
+            final myAvatar = (user?.avatarUrl.isNotEmpty == true)
                 ? user!.avatarUrl
                 : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500';
 
@@ -2198,6 +2244,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
             } else {
               final newPost = FeedPost(
                 id: 'post_${DateTime.now().millisecondsSinceEpoch}',
+                ownerId: user?.id,
                 username: myUname,
                 location: location ?? 'Tokyo Cloud',
                 avatarUrl: myAvatar,
@@ -2432,8 +2479,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
                       FadeTransition(opacity: anim, child: child),
                 ),
               );
-            } else {
-              _openPostMomentSheet();
             }
           }
         },

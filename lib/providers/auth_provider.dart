@@ -218,6 +218,11 @@ class AuthProvider with ChangeNotifier {
         notifyListeners();
         return true;
       }
+      if (res.user != null && res.session == null) {
+        _currentUser = null;
+        _errorMessage =
+            'Registration succeeded. Confirm your email, then sign in.';
+      }
     } catch (e) {
       debugPrint("Supabase sign-up error: $e");
       final errorStr = e.toString().toLowerCase();

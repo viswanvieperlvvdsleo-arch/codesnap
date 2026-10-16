@@ -1,11 +1,12 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../models/task.dart';
-import '../utils/mock_data.dart';
+import '../services/arena_service.dart';
+import '../services/realtime_sync_service.dart';
 import '../widgets/task_card.dart';
 import '../widgets/spring_button.dart';
-import '../providers/theme_provider.dart';
 import 'arena_event_detail_screen.dart';
 
 class TasksScreen extends StatefulWidget {
@@ -31,25 +32,71 @@ class _TasksScreenState extends State<TasksScreen> {
   String _selectedCategory = 'All';
 
   // Local state reference for dynamic updates (voting, hosting)
-  late List<Task> _tasks;
+  List<Task> _tasks = [];
+  bool _isLoading = true;
+  String? _loadError;
+  VoidCallback? _stopRealtime;
+  Timer? _realtimeRefreshTimer;
 
   @override
   void initState() {
     super.initState();
-    _tasks = List.from(MockData.mockTasks);
+    _loadArena();
+    _stopRealtime = RealtimeSyncService.instance.subscribe(
+      const {
+        'arena_events',
+        'arena_teams',
+        'arena_votes',
+        'arena_submissions',
+        'arena_bookmarks',
+      },
+      (_) {
+        _realtimeRefreshTimer?.cancel();
+        _realtimeRefreshTimer =
+            Timer(const Duration(milliseconds: 250), _loadArena);
+      },
+    );
+  }
+
+  Future<void> _loadArena() async {
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _loadError = null;
+      });
+    }
+    try {
+      final events = await ArenaService.fetchEvents();
+      if (!mounted) return;
+      setState(() {
+        _tasks = events;
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError = 'Could not load Arena from the server.';
+      });
+    }
   }
 
   @override
   void dispose() {
+    _stopRealtime?.call();
+    _realtimeRefreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
   List<Task> get _filteredTasks {
     return _tasks.where((task) {
-      final matchesSearch = task.title.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+      final matchesSearch = task.title
+              .toLowerCase()
+              .contains(_searchTerm.toLowerCase()) ||
           task.description.toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          task.tags.any((tag) => tag.toLowerCase().contains(_searchTerm.toLowerCase()));
+          task.tags.any(
+              (tag) => tag.toLowerCase().contains(_searchTerm.toLowerCase()));
 
       final matchesTab = switch (_activeTab) {
         'hackathons' => task.eventType.toLowerCase() == 'hackathon',
@@ -60,11 +107,25 @@ class _TasksScreenState extends State<TasksScreen> {
 
       final matchesCategory = switch (_selectedCategory) {
         'All' => true,
-        'AI & Agents' => task.tags.any((t) => t.toLowerCase().contains('ai') || t.toLowerCase().contains('agent') || t.toLowerCase().contains('llm')),
-        'Mobile / Flutter' => task.tags.any((t) => t.toLowerCase().contains('flutter') || t.toLowerCase().contains('mobile')),
-        'WASM / Systems' => task.tags.any((t) => t.toLowerCase().contains('wasm') || t.toLowerCase().contains('terminal') || t.toLowerCase().contains('fastapi')),
-        'UI / UX' => task.tags.any((t) => t.toLowerCase().contains('design') || t.toLowerCase().contains('glass') || t.toLowerCase().contains('ui')),
-        'Web3' => task.tags.any((t) => t.toLowerCase().contains('web3') || t.toLowerCase().contains('crypto') || t.toLowerCase().contains('escrow')),
+        'AI & Agents' => task.tags.any((t) =>
+            t.toLowerCase().contains('ai') ||
+            t.toLowerCase().contains('agent') ||
+            t.toLowerCase().contains('llm')),
+        'Mobile / Flutter' => task.tags.any((t) =>
+            t.toLowerCase().contains('flutter') ||
+            t.toLowerCase().contains('mobile')),
+        'WASM / Systems' => task.tags.any((t) =>
+            t.toLowerCase().contains('wasm') ||
+            t.toLowerCase().contains('terminal') ||
+            t.toLowerCase().contains('fastapi')),
+        'UI / UX' => task.tags.any((t) =>
+            t.toLowerCase().contains('design') ||
+            t.toLowerCase().contains('glass') ||
+            t.toLowerCase().contains('ui')),
+        'Web3' => task.tags.any((t) =>
+            t.toLowerCase().contains('web3') ||
+            t.toLowerCase().contains('crypto') ||
+            t.toLowerCase().contains('escrow')),
         _ => true,
       };
 
@@ -73,37 +134,45 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   // Cast vote for a team
-  void _castVote(Task task, TeamShowdown team) {
-    setState(() {
-      team.votes += 1;
-      task.totalVotes += 1;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFF1E2028),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: Row(
-          children: [
-            const Icon(LucideIcons.checkCircle2, color: Color(0xFF00E676), size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Vote registered for ${team.teamName}! 🎉',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+  Future<void> _castVote(Task task, TeamShowdown team) async {
+    try {
+      await ArenaService.castVote(eventId: task.id, teamId: team.id);
+      await _loadArena();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF1E2028),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          content: Row(
+            children: [
+              const Icon(LucideIcons.checkCircle2,
+                  color: Color(0xFF00E676), size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Vote registered for ${team.teamName}! 🎉',
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+          duration: const Duration(seconds: 2),
         ),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Vote failed: $error')),
+      );
+    }
   }
 
   // Open Full Arena Event Detail Screen
-  void _openEventDetail(Task task) {
-    Navigator.of(context).push(
+  Future<void> _openEventDetail(Task task) async {
+    await Navigator.of(context).push(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 300),
         reverseTransitionDuration: const Duration(milliseconds: 240),
@@ -114,17 +183,21 @@ class _TasksScreenState extends State<TasksScreen> {
           );
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          final curve = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+          final curve =
+              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
           return FadeTransition(
             opacity: curve,
             child: SlideTransition(
-              position: Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero).animate(curve),
+              position:
+                  Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero)
+                      .animate(curve),
               child: child,
             ),
           );
         },
       ),
     );
+    await _loadArena();
   }
 
   // Open Showdown Modal
@@ -144,7 +217,8 @@ class _TasksScreenState extends State<TasksScreen> {
                 ),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0F1015).withOpacity(0.95),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(28)),
                   border: Border.all(
                     color: Colors.white.withOpacity(0.15),
                     width: 1.2,
@@ -175,7 +249,8 @@ class _TasksScreenState extends State<TasksScreen> {
                             children: [
                               Row(
                                 children: [
-                                  const Icon(LucideIcons.swords, size: 16, color: Color(0xFF54C5F8)),
+                                  const Icon(LucideIcons.swords,
+                                      size: 16, color: Color(0xFF54C5F8)),
                                   const SizedBox(width: 8),
                                   Text(
                                     'COMMUNITY SHOWDOWN',
@@ -203,15 +278,19 @@ class _TasksScreenState extends State<TasksScreen> {
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
                             color: const Color(0xFFFFD700).withOpacity(0.15),
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.4)),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFFFFD700).withOpacity(0.4)),
                           ),
                           child: Row(
                             children: [
-                              const Icon(LucideIcons.trophy, size: 14, color: Color(0xFFFFD700)),
+                              const Icon(LucideIcons.trophy,
+                                  size: 14, color: Color(0xFFFFD700)),
                               const SizedBox(width: 6),
                               Text(
                                 task.prizePool,
@@ -229,7 +308,10 @@ class _TasksScreenState extends State<TasksScreen> {
                     const SizedBox(height: 16),
                     Text(
                       'Vote for the most innovative project built during this event. The winning team claims the prize pool when the deadline passes!',
-                      style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, height: 1.4),
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 13,
+                          height: 1.4),
                     ),
                     const SizedBox(height: 20),
 
@@ -241,8 +323,10 @@ class _TasksScreenState extends State<TasksScreen> {
                         separatorBuilder: (_, __) => const SizedBox(height: 14),
                         itemBuilder: (context, index) {
                           final team = task.teams[index];
-                          final totalVotes = task.totalVotes > 0 ? task.totalVotes : 1;
-                          final votePercent = ((team.votes / totalVotes) * 100).toInt();
+                          final totalVotes =
+                              task.totalVotes > 0 ? task.totalVotes : 1;
+                          final votePercent =
+                              ((team.votes / totalVotes) * 100).toInt();
 
                           return Container(
                             padding: const EdgeInsets.all(16),
@@ -258,15 +342,20 @@ class _TasksScreenState extends State<TasksScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Row(
                                       children: [
                                         CircleAvatar(
                                           radius: 16,
-                                          backgroundColor: const Color(0xFF54C5F8).withOpacity(0.2),
+                                          backgroundColor:
+                                              const Color(0xFF54C5F8)
+                                                  .withOpacity(0.2),
                                           child: Text(
-                                            team.teamName.isNotEmpty ? team.teamName[0] : 'T',
+                                            team.teamName.isNotEmpty
+                                                ? team.teamName[0]
+                                                : 'T',
                                             style: const TextStyle(
                                               color: Color(0xFF54C5F8),
                                               fontWeight: FontWeight.bold,
@@ -275,7 +364,8 @@ class _TasksScreenState extends State<TasksScreen> {
                                         ),
                                         const SizedBox(width: 10),
                                         Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               team.teamName,
@@ -288,7 +378,8 @@ class _TasksScreenState extends State<TasksScreen> {
                                             Text(
                                               team.projectTitle,
                                               style: TextStyle(
-                                                color: const Color(0xFF54C5F8).withOpacity(0.9),
+                                                color: const Color(0xFF54C5F8)
+                                                    .withOpacity(0.9),
                                                 fontSize: 12,
                                                 fontWeight: FontWeight.w500,
                                               ),
@@ -300,19 +391,25 @@ class _TasksScreenState extends State<TasksScreen> {
 
                                     // Vote Button
                                     ElevatedButton.icon(
-                                      onPressed: () {
-                                        _castVote(task, team);
-                                        setModalState(() {});
+                                      onPressed: () async {
+                                        await _castVote(task, team);
+                                        if (modalContext.mounted) {
+                                          Navigator.pop(modalContext);
+                                        }
                                       },
-                                      icon: const Icon(LucideIcons.heart, size: 14, color: Colors.white),
+                                      icon: const Icon(LucideIcons.heart,
+                                          size: 14, color: Colors.white),
                                       label: Text('Vote (${team.votes})'),
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF54C5F8),
+                                        backgroundColor:
+                                            const Color(0xFF54C5F8),
                                         foregroundColor: Colors.black,
                                         elevation: 0,
-                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 14, vertical: 8),
                                         shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10),
+                                          borderRadius:
+                                              BorderRadius.circular(10),
                                         ),
                                         textStyle: const TextStyle(
                                           fontSize: 12,
@@ -333,15 +430,18 @@ class _TasksScreenState extends State<TasksScreen> {
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      const Icon(LucideIcons.rss, size: 13, color: Colors.white54),
+                                      const Icon(LucideIcons.rss,
+                                          size: 13, color: Colors.white54),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
                                           team.growthUpdate,
                                           style: TextStyle(
-                                            color: Colors.white.withOpacity(0.8),
+                                            color:
+                                                Colors.white.withOpacity(0.8),
                                             fontSize: 12,
                                             height: 1.35,
                                           ),
@@ -361,8 +461,11 @@ class _TasksScreenState extends State<TasksScreen> {
                                         child: LinearProgressIndicator(
                                           value: team.votes / totalVotes,
                                           minHeight: 6,
-                                          backgroundColor: Colors.white.withOpacity(0.1),
-                                          valueColor: const AlwaysStoppedAnimation(Color(0xFF54C5F8)),
+                                          backgroundColor:
+                                              Colors.white.withOpacity(0.1),
+                                          valueColor:
+                                              const AlwaysStoppedAnimation(
+                                                  Color(0xFF54C5F8)),
                                         ),
                                       ),
                                     ),
@@ -400,6 +503,7 @@ class _TasksScreenState extends State<TasksScreen> {
     final prizeCtrl = TextEditingController(text: '₹20,000');
     final tagsCtrl = TextEditingController(text: 'Flutter, AI Agents');
     String eventType = 'Hackathon';
+    bool isSubmitting = false;
 
     showModalBottomSheet(
       context: context,
@@ -418,7 +522,8 @@ class _TasksScreenState extends State<TasksScreen> {
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0F1015).withOpacity(0.96),
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(28)),
                     border: Border.all(color: Colors.white.withOpacity(0.15)),
                   ),
                   child: SingleChildScrollView(
@@ -442,7 +547,8 @@ class _TasksScreenState extends State<TasksScreen> {
                         // Title
                         Row(
                           children: [
-                            const Icon(LucideIcons.sparkles, color: Color(0xFFFFD700), size: 20),
+                            const Icon(LucideIcons.sparkles,
+                                color: Color(0xFFFFD700), size: 20),
                             const SizedBox(width: 8),
                             const Text(
                               'Host a Hackathon or Bounty',
@@ -457,13 +563,16 @@ class _TasksScreenState extends State<TasksScreen> {
                         const SizedBox(height: 6),
                         Text(
                           'Inspire builders to create together, share growth feeds, and win rewards.',
-                          style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 13),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.65),
+                              fontSize: 13),
                         ),
                         const SizedBox(height: 18),
 
                         // Event Type Selector
                         Row(
-                          children: ['Hackathon', 'Bounty', 'Challenge'].map((type) {
+                          children:
+                              ['Hackathon', 'Bounty', 'Challenge'].map((type) {
                             final isSel = eventType == type;
                             return Padding(
                               padding: const EdgeInsets.only(right: 8.0),
@@ -477,7 +586,8 @@ class _TasksScreenState extends State<TasksScreen> {
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12,
                                 ),
-                                onSelected: (_) => setModalState(() => eventType = type),
+                                onSelected: (_) =>
+                                    setModalState(() => eventType = type),
                               ),
                             );
                           }).toList(),
@@ -487,7 +597,8 @@ class _TasksScreenState extends State<TasksScreen> {
                         // Title Field
                         TextField(
                           controller: titleCtrl,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
                             labelText: 'Event Title',
                             labelStyle: const TextStyle(color: Colors.white70),
@@ -497,7 +608,8 @@ class _TasksScreenState extends State<TasksScreen> {
                             fillColor: Colors.white.withOpacity(0.08),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.18)),
+                              borderSide: BorderSide(
+                                  color: Colors.white.withOpacity(0.18)),
                             ),
                           ),
                         ),
@@ -509,15 +621,18 @@ class _TasksScreenState extends State<TasksScreen> {
                             Expanded(
                               child: TextField(
                                 controller: prizeCtrl,
-                                style: const TextStyle(color: Colors.white, fontSize: 14),
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 14),
                                 decoration: InputDecoration(
                                   labelText: 'Prize Pool',
-                                  labelStyle: const TextStyle(color: Colors.white70),
+                                  labelStyle:
+                                      const TextStyle(color: Colors.white70),
                                   filled: true,
                                   fillColor: Colors.white.withOpacity(0.08),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.18)),
+                                    borderSide: BorderSide(
+                                        color: Colors.white.withOpacity(0.18)),
                                   ),
                                 ),
                               ),
@@ -526,15 +641,18 @@ class _TasksScreenState extends State<TasksScreen> {
                             Expanded(
                               child: TextField(
                                 controller: tagsCtrl,
-                                style: const TextStyle(color: Colors.white, fontSize: 14),
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 14),
                                 decoration: InputDecoration(
                                   labelText: 'Tags (comma separated)',
-                                  labelStyle: const TextStyle(color: Colors.white70),
+                                  labelStyle:
+                                      const TextStyle(color: Colors.white70),
                                   filled: true,
                                   fillColor: Colors.white.withOpacity(0.08),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(color: Colors.white.withOpacity(0.18)),
+                                    borderSide: BorderSide(
+                                        color: Colors.white.withOpacity(0.18)),
                                   ),
                                 ),
                               ),
@@ -547,17 +665,20 @@ class _TasksScreenState extends State<TasksScreen> {
                         TextField(
                           controller: descCtrl,
                           maxLines: 3,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
                             labelText: 'Problem Statement & Requirements',
                             labelStyle: const TextStyle(color: Colors.white70),
-                            hintText: 'Describe the goal, expected output, and guidelines...',
+                            hintText:
+                                'Describe the goal, expected output, and guidelines...',
                             hintStyle: const TextStyle(color: Colors.white38),
                             filled: true,
                             fillColor: Colors.white.withOpacity(0.08),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.white.withOpacity(0.18)),
+                              borderSide: BorderSide(
+                                  color: Colors.white.withOpacity(0.18)),
                             ),
                           ),
                         ),
@@ -568,73 +689,82 @@ class _TasksScreenState extends State<TasksScreen> {
                           width: double.infinity,
                           height: 48,
                           child: ElevatedButton(
-                            onPressed: () {
-                              if (titleCtrl.text.trim().isEmpty) return;
-
-                              final newTask = Task(
-                                id: 'event-${DateTime.now().millisecondsSinceEpoch}',
-                                title: titleCtrl.text.trim(),
-                                description: descCtrl.text.trim().isNotEmpty
-                                    ? descCtrl.text.trim()
-                                    : 'A fast-paced developer competition.',
-                                course: 'Community',
-                                branch: 'Global',
-                                section: 'A',
-                                year: '2026',
-                                deadline: DateTime.now().add(const Duration(days: 7)).toIso8601String(),
-                                createdAt: DateTime.now().toIso8601String(),
-                                ownerId: 'user-self',
-                                submissionCount: 1,
-                                prizePool: prizeCtrl.text.trim().isNotEmpty ? prizeCtrl.text.trim() : '₹10,000',
-                                eventType: eventType,
-                                status: 'LIVE',
-                                tags: tagsCtrl.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
-                                teamsCount: 1,
-                                totalVotes: 0,
-                                teams: [
-                                  TeamShowdown(
-                                    id: 'team-new-1',
-                                    teamName: 'Team Pioneer',
-                                    projectTitle: 'Initial Submission',
-                                    growthUpdate: 'Registered in the arena!',
-                                    votes: 0,
-                                    memberAvatars: [],
-                                  ),
-                                ],
-                              );
-
-                              setState(() {
-                                _tasks.insert(0, newTask);
-                                MockData.mockTasks.insert(0, newTask);
-                              });
-
-                              Navigator.pop(ctx);
-
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  backgroundColor: const Color(0xFF1E2028),
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  content: Row(
-                                    children: [
-                                      const Icon(LucideIcons.checkCheck, color: Color(0xFF00E676), size: 18),
-                                      const SizedBox(width: 10),
-                                      const Text(
-                                        'Hackathon live in Arena! 🚀',
-                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
+                            onPressed: isSubmitting
+                                ? null
+                                : () async {
+                                    if (titleCtrl.text.trim().isEmpty) return;
+                                    setModalState(() => isSubmitting = true);
+                                    try {
+                                      await ArenaService.createEvent(
+                                        title: titleCtrl.text,
+                                        description: descCtrl.text
+                                                .trim()
+                                                .isEmpty
+                                            ? 'A fast-paced developer competition.'
+                                            : descCtrl.text,
+                                        prizePool: prizeCtrl.text,
+                                        eventType: eventType,
+                                        tags: tagsCtrl.text
+                                            .split(',')
+                                            .map((value) => value.trim())
+                                            .where((value) => value.isNotEmpty)
+                                            .toList(),
+                                        deadline: DateTime.now()
+                                            .add(const Duration(days: 7)),
+                                      );
+                                      await _loadArena();
+                                      if (!ctx.mounted) return;
+                                      Navigator.pop(ctx);
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          backgroundColor:
+                                              const Color(0xFF1E2028),
+                                          behavior: SnackBarBehavior.floating,
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12)),
+                                          content: Row(
+                                            children: [
+                                              const Icon(LucideIcons.checkCheck,
+                                                  color: Color(0xFF00E676),
+                                                  size: 18),
+                                              const SizedBox(width: 10),
+                                              const Text(
+                                                'Event published to Arena.',
+                                                style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight:
+                                                        FontWeight.bold),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    } catch (error) {
+                                      if (!ctx.mounted) return;
+                                      setModalState(() => isSubmitting = false);
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                              'Could not publish event: $error'),
+                                        ),
+                                      );
+                                    }
+                                  },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF54C5F8),
                               foregroundColor: Colors.black,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              textStyle: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 15),
                             ),
-                            child: const Text('Publish to Arena'),
+                            child: Text(isSubmitting
+                                ? 'Publishing...'
+                                : 'Publish to Arena'),
                           ),
                         ),
                       ],
@@ -651,6 +781,29 @@ class _TasksScreenState extends State<TasksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading && _tasks.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF54C5F8)),
+      );
+    }
+    if (_loadError != null && _tasks.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(LucideIcons.cloudOff, color: Colors.white54, size: 42),
+            const SizedBox(height: 12),
+            Text(_loadError!, style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _loadArena,
+              icon: const Icon(LucideIcons.refreshCw, size: 16),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
     final tasksList = _filteredTasks;
     final width = MediaQuery.of(context).size.width;
 
@@ -661,68 +814,75 @@ class _TasksScreenState extends State<TasksScreen> {
       crossAxisCount = 2;
     }
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Search & Host Bar (Direct, Compact, Overflow-free) ────────────
-          _buildSearchAndHostBar(),
-          const SizedBox(height: 12),
+    return RefreshIndicator(
+      onRefresh: _loadArena,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Search & Host Bar (Direct, Compact, Overflow-free) ────────────
+            _buildSearchAndHostBar(),
+            const SizedBox(height: 12),
 
-          // ── Category Pills Filter ─────────────────────────────────────────
-          _buildCategoryPills(),
-          const SizedBox(height: 12),
+            // ── Category Pills Filter ─────────────────────────────────────────
+            _buildCategoryPills(),
+            const SizedBox(height: 12),
 
-          // ── Tabs Bar (All Events, Hackathons, Bounties, Showdown) ───────────
-          _buildTabBar(),
-          const SizedBox(height: 14),
-
-          // ── Featured Spotlight Banner ─────────────────────────────────────
-          if (_tasks.isNotEmpty && _searchTerm.isEmpty && _activeTab == 'all') ...[
-            _buildSpotlightBanner(_tasks.first),
+            // ── Tabs Bar (All Events, Hackathons, Bounties, Showdown) ───────────
+            _buildTabBar(),
             const SizedBox(height: 14),
-          ],
 
-          // ── Main Content Grid / List ──────────────────────────────────────
-          tasksList.isEmpty
-              ? _buildEmptyState()
-              : crossAxisCount > 1
-                  ? GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: crossAxisCount,
-                        crossAxisSpacing: 18,
-                        mainAxisSpacing: 18,
-                        mainAxisExtent: 385,
+            // ── Featured Spotlight Banner ─────────────────────────────────────
+            if (_tasks.isNotEmpty &&
+                _searchTerm.isEmpty &&
+                _activeTab == 'all') ...[
+              _buildSpotlightBanner(_tasks.first),
+              const SizedBox(height: 14),
+            ],
+
+            // ── Main Content Grid / List ──────────────────────────────────────
+            tasksList.isEmpty
+                ? _buildEmptyState()
+                : crossAxisCount > 1
+                    ? GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          crossAxisSpacing: 18,
+                          mainAxisSpacing: 18,
+                          mainAxisExtent: 385,
+                        ),
+                        itemCount: tasksList.length,
+                        itemBuilder: (context, index) {
+                          return TaskCard(
+                            task: tasksList[index],
+                            onOpenInWorkspace: widget.onOpenTaskInWorkspace,
+                            onOpenShowdown: _openShowdownModal,
+                            onOpenDetail: _openEventDetail,
+                          );
+                        },
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: tasksList.length,
+                        itemBuilder: (context, index) {
+                          return TaskCard(
+                            task: tasksList[index],
+                            onOpenInWorkspace: widget.onOpenTaskInWorkspace,
+                            onOpenShowdown: _openShowdownModal,
+                            onOpenDetail: _openEventDetail,
+                          );
+                        },
                       ),
-                      itemCount: tasksList.length,
-                      itemBuilder: (context, index) {
-                        return TaskCard(
-                          task: tasksList[index],
-                          onOpenInWorkspace: widget.onOpenTaskInWorkspace,
-                          onOpenShowdown: _openShowdownModal,
-                          onOpenDetail: _openEventDetail,
-                        );
-                      },
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: tasksList.length,
-                      itemBuilder: (context, index) {
-                        return TaskCard(
-                          task: tasksList[index],
-                          onOpenInWorkspace: widget.onOpenTaskInWorkspace,
-                          onOpenShowdown: _openShowdownModal,
-                          onOpenDetail: _openEventDetail,
-                        );
-                      },
-                    ),
-          const SizedBox(height: 100),
-        ],
+            const SizedBox(height: 100),
+          ],
+        ),
       ),
     );
   }
@@ -767,11 +927,15 @@ class _TasksScreenState extends State<TasksScreen> {
                           runSpacing: 4,
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 2.5),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFFFD700).withOpacity(0.18),
+                                color:
+                                    const Color(0xFFFFD700).withOpacity(0.18),
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.4)),
+                                border: Border.all(
+                                    color: const Color(0xFFFFD700)
+                                        .withOpacity(0.4)),
                               ),
                               child: const Text(
                                 'FEATURED ARENA',
@@ -820,15 +984,19 @@ class _TasksScreenState extends State<TasksScreen> {
                   const SizedBox(width: 10),
                   ElevatedButton.icon(
                     onPressed: () => _openEventDetail(featured),
-                    icon: const Icon(LucideIcons.rocket, size: 13, color: Colors.black),
+                    icon: const Icon(LucideIcons.rocket,
+                        size: 13, color: Colors.black),
                     label: const Text('Enter'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF54C5F8),
                       foregroundColor: Colors.black,
                       elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      textStyle: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
@@ -844,9 +1012,17 @@ class _TasksScreenState extends State<TasksScreen> {
   Widget _buildTabBar() {
     final tabs = [
       {'id': 'all', 'label': 'All Events', 'icon': LucideIcons.sparkles},
-      {'id': 'hackathons', 'label': 'Live Hackathons', 'icon': LucideIcons.flame},
+      {
+        'id': 'hackathons',
+        'label': 'Live Hackathons',
+        'icon': LucideIcons.flame
+      },
       {'id': 'bounties', 'label': 'Code Bounties', 'icon': LucideIcons.coins},
-      {'id': 'showdown', 'label': 'Community Showdown', 'icon': LucideIcons.swords},
+      {
+        'id': 'showdown',
+        'label': 'Community Showdown',
+        'icon': LucideIcons.swords
+      },
     ];
 
     return SingleChildScrollView(
@@ -862,12 +1038,17 @@ class _TasksScreenState extends State<TasksScreen> {
               onTap: () => setState(() => _activeTab = tab['id'] as String),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isSel ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.06),
+                  color: isSel
+                      ? const Color(0xFF54C5F8)
+                      : Colors.white.withOpacity(0.06),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isSel ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.12),
+                    color: isSel
+                        ? const Color(0xFF54C5F8)
+                        : Colors.white.withOpacity(0.12),
                     width: 1,
                   ),
                 ),
@@ -917,11 +1098,14 @@ class _TasksScreenState extends State<TasksScreen> {
               cursorColor: const Color(0xFF54C5F8),
               decoration: InputDecoration(
                 hintText: 'Search hackathons, bounties, tech tags...',
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12.5),
-                prefixIcon: const Icon(LucideIcons.search, size: 16, color: Colors.white70),
+                hintStyle: TextStyle(
+                    color: Colors.white.withOpacity(0.4), fontSize: 12.5),
+                prefixIcon: const Icon(LucideIcons.search,
+                    size: 16, color: Colors.white70),
                 suffixIcon: _searchTerm.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(LucideIcons.x, size: 16, color: Colors.white70),
+                        icon: const Icon(LucideIcons.x,
+                            size: 16, color: Colors.white70),
                         onPressed: () {
                           _searchController.clear();
                           setState(() => _searchTerm = '');
@@ -932,7 +1116,8 @@ class _TasksScreenState extends State<TasksScreen> {
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
                 focusedBorder: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
             ),
           ),
@@ -1003,12 +1188,17 @@ class _TasksScreenState extends State<TasksScreen> {
               onTap: () => setState(() => _selectedCategory = cat),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 160),
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5.5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 11, vertical: 5.5),
                 decoration: BoxDecoration(
-                  color: isSel ? const Color(0xFF54C5F8).withOpacity(0.18) : Colors.white.withOpacity(0.04),
+                  color: isSel
+                      ? const Color(0xFF54C5F8).withOpacity(0.18)
+                      : Colors.white.withOpacity(0.04),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: isSel ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.10),
+                    color: isSel
+                        ? const Color(0xFF54C5F8)
+                        : Colors.white.withOpacity(0.10),
                     width: 1,
                   ),
                 ),

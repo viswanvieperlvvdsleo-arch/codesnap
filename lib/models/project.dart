@@ -12,6 +12,11 @@ class Project {
   final String cssTemplate;
   final String jsTemplate;
   final bool isFeatured;
+  final String? gitRepoUrl;
+  final String? gitBranch;
+  final String? gitOwner;
+  final String? gitRepoName;
+  final String? ownerId;
 
   Project({
     required this.id,
@@ -27,7 +32,15 @@ class Project {
     required this.cssTemplate,
     required this.jsTemplate,
     this.isFeatured = false,
+    this.gitRepoUrl,
+    this.gitBranch,
+    this.gitOwner,
+    this.gitRepoName,
+    this.ownerId,
   });
+
+  bool get isGitHubProject =>
+      gitRepoUrl != null && gitOwner != null && gitRepoName != null;
 
   factory Project.fromJson(Map<String, dynamic> json) {
     return Project(
@@ -44,6 +57,42 @@ class Project {
       cssTemplate: json['cssTemplate'] as String,
       jsTemplate: json['jsTemplate'] as String,
       isFeatured: json['isFeatured'] as bool? ?? false,
+      gitRepoUrl: json['gitRepoUrl'] as String?,
+      gitBranch: json['gitBranch'] as String?,
+      gitOwner: json['gitOwner'] as String?,
+      gitRepoName: json['gitRepoName'] as String?,
+      ownerId: json['ownerId'] as String?,
+    );
+  }
+
+  factory Project.fromWorkspaceRow(Map<String, dynamic> row) {
+    return Project(
+      id: row['id'].toString(),
+      title: row['name']?.toString() ??
+          row['git_repo_name']?.toString() ??
+          'GitHub project',
+      category: 'Productivity Tools',
+      difficulty: 'Intermediate',
+      description:
+          row['description']?.toString() ?? 'GitHub repository workspace',
+      features: const [
+        'Live GitHub file tree',
+        'On-demand workspace loading',
+        'Safe personal editing workspace',
+      ],
+      techStack: const ['GitHub', 'Git'],
+      estimatedTime: 'Live repository',
+      thumbnailUrl:
+          'https://images.unsplash.com/photo-1556075798-4825dfaaf498?w=600',
+      htmlTemplate: '',
+      cssTemplate: '',
+      jsTemplate: '',
+      isFeatured: true,
+      gitRepoUrl: row['git_repo_url']?.toString(),
+      gitBranch: row['git_branch']?.toString(),
+      gitOwner: row['git_owner']?.toString(),
+      gitRepoName: row['git_repo_name']?.toString(),
+      ownerId: row['user_id']?.toString(),
     );
   }
 
@@ -62,6 +111,11 @@ class Project {
       'cssTemplate': cssTemplate,
       'jsTemplate': jsTemplate,
       'isFeatured': isFeatured,
+      'gitRepoUrl': gitRepoUrl,
+      'gitBranch': gitBranch,
+      'gitOwner': gitOwner,
+      'gitRepoName': gitRepoName,
+      'ownerId': ownerId,
     };
   }
 }

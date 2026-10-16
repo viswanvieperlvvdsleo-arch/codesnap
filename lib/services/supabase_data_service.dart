@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_service.dart';
+import 'upload_status_service.dart';
 
 /// ─── SupabaseDataService ───────────────────────────────────────────────────
 /// High-level production service for Auth, Feed, Stories, Social, Chat, & Workspace
@@ -65,6 +66,10 @@ class SupabaseDataService {
     }
 
     final meta = user.userMetadata ?? {};
+    final metadataAvatar = meta['avatar_url']?.toString() ?? '';
+    final profileAvatar = data?['avatar_url']?.toString() ?? '';
+    final resolvedAvatar =
+        metadataAvatar.startsWith('https://') ? metadataAvatar : profileAvatar;
     return {
       'id': user.id,
       'email': user.email ?? '',
@@ -76,7 +81,7 @@ class SupabaseDataService {
           meta['username'] ??
           user.email?.split('@').first ??
           'dev',
-      'avatar_url': data?['avatar_url'] ?? meta['avatar_url'] ?? '',
+      'avatar_url': resolvedAvatar,
       'headline': data?['headline'] ?? meta['headline'] ?? '',
       'bio': data?['bio'] ?? meta['bio'] ?? '',
       'department': data?['department'] ?? meta['department'] ?? '',
@@ -239,8 +244,8 @@ class SupabaseDataService {
         final List<Map<String, dynamic>> result = [];
         final userIds = flatPosts
             .map((p) => p['user_id']?.toString())
-            .where((id) => id != null && _isUuid(id!))
-            .cast<String>()
+            .whereType<String>()
+            .where(_isUuid)
             .toSet()
             .toList();
 
@@ -290,7 +295,7 @@ class SupabaseDataService {
   static String toValidUuid(String id) {
     if (_isUuid(id)) return id;
     final clean = id.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
-    final seed = (clean + 'codesnapfallbackuuid0123456789abcdef').toLowerCase();
+    final seed = '${clean}codesnapfallbackuuid0123456789abcdef'.toLowerCase();
     final hexChars =
         seed.codeUnits.map((c) => (c % 16).toRadixString(16)).join();
     final h = hexChars.padRight(32, '0').substring(0, 32);
@@ -329,11 +334,13 @@ class SupabaseDataService {
   }) async {
     final authUid = _client.auth.currentUser?.id;
     if (authUid == null || authUid.isEmpty) {
+      UploadStatusService.instance.fail(label: 'Sign in to upload');
       debugPrint(
           'Supabase createPost skipped: no authenticated Supabase session.');
       return null;
     }
     final uid = authUid;
+    UploadStatusService.instance.start(label: 'Publishing post');
     final resolvedPostId = postId != null && _isUuid(postId) ? postId : null;
 
     // The signup trigger owns profile creation. Upserting here can overwrite
@@ -344,6 +351,7 @@ class SupabaseDataService {
         .eq('id', uid)
         .maybeSingle();
     if (authorProfile == null) {
+      UploadStatusService.instance.fail(label: 'Profile setup incomplete');
       debugPrint('Cannot post: authenticated user has no profile row.');
       return null;
     }
@@ -361,6 +369,7 @@ class SupabaseDataService {
           (codeSnippet.startsWith('data:') ||
               codeSnippet.startsWith('blob:')) &&
           persistedSnippet == null) {
+        UploadStatusService.instance.fail(label: 'Post upload failed');
         return null;
       }
 
@@ -380,8 +389,10 @@ class SupabaseDataService {
           .select()
           .single();
 
+      UploadStatusService.instance.succeed(label: 'Post uploaded');
       return res;
     } catch (e) {
+      UploadStatusService.instance.fail(label: 'Post upload failed');
       debugPrint('Supabase createPost error: $e');
       return null;
     }
@@ -441,6 +452,7 @@ class SupabaseDataService {
               upsert: true,
             ),
           );
+      UploadStatusService.instance.update(0.85);
       return _client.storage
           .from(SupabaseService.bucketPostMedia)
           .getPublicUrl(objectPath);
@@ -648,11 +660,13 @@ class SupabaseDataService {
   }) async {
     final authUid = _client.auth.currentUser?.id;
     if (authUid == null || authUid.isEmpty) {
+      UploadStatusService.instance.fail(label: 'Sign in to upload');
       debugPrint(
           'Supabase createStory skipped: no authenticated Supabase session.');
       return false;
     }
     final uid = authUid;
+    UploadStatusService.instance.start(label: 'Publishing story');
     final resolvedStoryId = storyId != null && _isUuid(storyId)
         ? storyId
         : toValidUuid('${DateTime.now().microsecondsSinceEpoch}-$uid-story');
@@ -676,6 +690,7 @@ class SupabaseDataService {
       if (mediaUrl != null &&
           (mediaUrl.startsWith('data:') || mediaUrl.startsWith('blob:')) &&
           persistedMedia == null) {
+        UploadStatusService.instance.fail(label: 'Story upload failed');
         return false;
       }
 
@@ -687,8 +702,10 @@ class SupabaseDataService {
         'code_language': codeLanguage,
         'media_url': persistedMedia,
       }, onConflict: 'id');
+      UploadStatusService.instance.succeed(label: 'Story uploaded');
       return true;
     } catch (e) {
+      UploadStatusService.instance.fail(label: 'Story upload failed');
       debugPrint('Supabase createStory error: $e');
       return false;
     }
@@ -701,18 +718,126 @@ class SupabaseDataService {
   /// Fetch all registered developers
   static Future<List<Map<String, dynamic>>> fetchDevelopers(
       {int limit = 50}) async {
-    try {
-      final data = await _client
-          .from(SupabaseService.tableProfiles)
-          .select()
-          .order('created_at', ascending: false)
-          .limit(limit);
+    final data = await _client
+        .from('people_directory')
+        .select()
+        .order('created_at', ascending: false)
+        .limit(limit);
+    return List<Map<String, dynamic>>.from(data);
+  }
 
-      return List<Map<String, dynamic>>.from(data);
-    } catch (e) {
-      debugPrint('Error fetching developers: $e');
-      return [];
+  /// Searches the complete public people directory on the server. Separate
+  /// parameterized filters avoid embedding user input in PostgREST `.or()`
+  /// syntax, then duplicate matches are merged by account id.
+  static Future<List<Map<String, dynamic>>> searchDevelopers(
+    String searchText, {
+    int limit = 20,
+  }) async {
+    final query = searchText.trim();
+    if (query.isEmpty) return const [];
+    final safeLimit = limit.clamp(1, 50);
+    final pattern = '%$query%';
+    final results = await Future.wait([
+      _client
+          .from('people_directory')
+          .select()
+          .ilike('full_name', pattern)
+          .limit(safeLimit),
+      _client
+          .from('people_directory')
+          .select()
+          .ilike('username', pattern)
+          .limit(safeLimit),
+      _client
+          .from('people_directory')
+          .select()
+          .ilike('headline', pattern)
+          .limit(safeLimit),
+    ]);
+    final matchesById = <String, Map<String, dynamic>>{};
+    for (final result in results) {
+      for (final raw in result) {
+        final row = Map<String, dynamic>.from(raw);
+        final id = row['id']?.toString();
+        if (id != null && id.isNotEmpty) matchesById[id] = row;
+      }
     }
+    final matches = matchesById.values.toList(growable: false)
+      ..sort((a, b) => (a['full_name']?.toString() ?? '')
+          .toLowerCase()
+          .compareTo((b['full_name']?.toString() ?? '').toLowerCase()));
+    return matches.take(safeLimit).toList(growable: false);
+  }
+
+  /// Fetch one public-safe profile with authoritative snap and post counts.
+  static Future<Map<String, dynamic>?> fetchDeveloperById(String userId) async {
+    if (!_isUuid(userId)) return null;
+    final data = await _client
+        .from('people_directory')
+        .select()
+        .eq('id', userId)
+        .maybeSingle();
+    return data == null ? null : Map<String, dynamic>.from(data);
+  }
+
+  /// IDs connected to a profile. `snapped` are users snapping this profile;
+  /// `snapping` are users this profile currently snaps.
+  static Future<({Set<String> snapped, Set<String> snapping})>
+      fetchDeveloperConnectionIds(String userId) async {
+    if (!_isUuid(userId)) {
+      return (snapped: <String>{}, snapping: <String>{});
+    }
+    final results = await Future.wait([
+      _client
+          .from(SupabaseService.tableFollowers)
+          .select('follower_id')
+          .eq('following_id', userId),
+      _client
+          .from(SupabaseService.tableFollowers)
+          .select('following_id')
+          .eq('follower_id', userId),
+    ]);
+    final snappedRows = List<Map<String, dynamic>>.from(results[0]);
+    final snappingRows = List<Map<String, dynamic>>.from(results[1]);
+    return (
+      snapped: snappedRows
+          .map((row) => row['follower_id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet(),
+      snapping: snappingRows
+          .map((row) => row['following_id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet(),
+    );
+  }
+
+  /// Set snap state without a client-side read/modify race.
+  static Future<bool> setSnapping({
+    required String targetUserId,
+    required bool shouldSnap,
+  }) async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw StateError('Sign in before snapping an account.');
+    }
+    if (user.id == targetUserId) {
+      throw ArgumentError('You cannot snap your own account.');
+    }
+
+    if (shouldSnap) {
+      await _client.from(SupabaseService.tableFollowers).upsert({
+        'follower_id': user.id,
+        'following_id': targetUserId,
+      }, onConflict: 'follower_id,following_id', ignoreDuplicates: true);
+      return true;
+    }
+
+    await _client
+        .from(SupabaseService.tableFollowers)
+        .delete()
+        .eq('follower_id', user.id)
+        .eq('following_id', targetUserId);
+    return false;
   }
 
   /// Toggle follow/unfollow for another developer
@@ -728,20 +853,9 @@ class SupabaseDataService {
         .maybeSingle();
 
     if (existing != null) {
-      // Unfollow
-      await _client
-          .from(SupabaseService.tableFollowers)
-          .delete()
-          .eq('follower_id', user.id)
-          .eq('following_id', targetUserId);
-      return false;
+      return setSnapping(targetUserId: targetUserId, shouldSnap: false);
     } else {
-      // Follow
-      await _client.from(SupabaseService.tableFollowers).insert({
-        'follower_id': user.id,
-        'following_id': targetUserId,
-      });
-      return true;
+      return setSnapping(targetUserId: targetUserId, shouldSnap: true);
     }
   }
 
@@ -817,50 +931,111 @@ class SupabaseDataService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  7. WORKSPACE CLOUD SYNC
+  //  7. WORKSPACE PROJECT METADATA
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Save or update a project and its file tree in the cloud
-  static Future<void> saveWorkspaceProject({
+  /// Returns only GitHub-linked project metadata. Repository files stay in
+  /// GitHub and are fetched into the local workspace on demand.
+  static Future<List<Map<String, dynamic>>>
+      fetchGitHubWorkspaceProjects() async {
+    final user = _client.auth.currentUser;
+    if (user == null) return [];
+    final rows = await _client
+        .from(SupabaseService.tableWorkspaceProjects)
+        .select(
+          'id, user_id, name, description, git_repo_url, git_branch, git_owner, '
+          'git_repo_name, runtime_mode, runtime_metadata, session_config, '
+          'last_runtime_session_id, last_run_at, created_at, updated_at',
+        )
+        .eq('user_id', user.id)
+        .not('git_repo_url', 'is', null)
+        .order('updated_at', ascending: false);
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  static Future<Map<String, dynamic>> linkGitHubWorkspaceProject({
     required String projectName,
-    required Map<String, String> files,
+    required String description,
+    required String repoUrl,
+    required String branch,
+    required String owner,
+    required String repoName,
   }) async {
     final user = _client.auth.currentUser;
-    if (user == null) return;
-
-    // 1. Get or create project
+    if (user == null) {
+      throw StateError('Sign in before linking a GitHub repository.');
+    }
     final existing = await _client
         .from(SupabaseService.tableWorkspaceProjects)
         .select('id')
         .eq('user_id', user.id)
-        .eq('name', projectName)
+        .eq('git_owner', owner)
+        .eq('git_repo_name', repoName)
+        .eq('git_branch', branch)
         .maybeSingle();
+    final values = {
+      'user_id': user.id,
+      'name': projectName,
+      'description': description,
+      'git_repo_url': repoUrl,
+      'git_branch': branch,
+      'git_owner': owner,
+      'git_repo_name': repoName,
+      'runtime_mode': 'auto',
+      'runtime_metadata': {
+        'source': 'github',
+        'owner': owner,
+        'repository': repoName,
+      },
+      'session_config': {'branch': branch},
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+    final query = existing == null
+        ? _client.from(SupabaseService.tableWorkspaceProjects).insert(values)
+        : _client
+            .from(SupabaseService.tableWorkspaceProjects)
+            .update(values)
+            .eq('id', existing['id']);
+    final row = await query
+        .select(
+          'id, user_id, name, description, git_repo_url, git_branch, git_owner, '
+          'git_repo_name, runtime_mode, runtime_metadata, session_config, '
+          'last_runtime_session_id, last_run_at, created_at, updated_at',
+        )
+        .single();
 
-    final String projectId;
-    if (existing != null) {
-      projectId = existing['id'] as String;
-      await _client.from(SupabaseService.tableWorkspaceProjects).update(
-          {'updated_at': DateTime.now().toIso8601String()}).eq('id', projectId);
-    } else {
-      final created = await _client
-          .from(SupabaseService.tableWorkspaceProjects)
-          .insert({
-            'user_id': user.id,
-            'name': projectName,
-          })
-          .select('id')
-          .single();
-      projectId = created['id'] as String;
-    }
+    // A linked GitHub project never stores code in Supabase. Remove only any
+    // legacy file rows attached to this exact project metadata record.
+    await _client
+        .from(SupabaseService.tableWorkspaceFiles)
+        .delete()
+        .eq('project_id', row['id']);
+    return Map<String, dynamic>.from(row);
+  }
 
-    // 2. Upsert files
-    for (final entry in files.entries) {
-      await _client.from(SupabaseService.tableWorkspaceFiles).upsert({
-        'project_id': projectId,
-        'path': entry.key,
-        'content': entry.value,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
+  static Future<void> updateWorkspaceRuntimeMetadata({
+    required String projectId,
+    required String runtimeMode,
+    required Map<String, dynamic> runtimeMetadata,
+    required Map<String, dynamic> sessionConfig,
+    String? runtimeSessionId,
+    DateTime? lastRunAt,
+  }) async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw StateError('Sign in before updating workspace runtime settings.');
     }
+    await _client
+        .from(SupabaseService.tableWorkspaceProjects)
+        .update({
+          'runtime_mode': runtimeMode,
+          'runtime_metadata': runtimeMetadata,
+          'session_config': sessionConfig,
+          'last_runtime_session_id': runtimeSessionId,
+          'last_run_at': lastRunAt?.toUtc().toIso8601String(),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', projectId)
+        .eq('user_id', user.id);
   }
 }

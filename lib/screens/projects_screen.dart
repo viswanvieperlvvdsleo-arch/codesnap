@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -5,8 +6,10 @@ import '../models/project.dart';
 import '../utils/mock_data.dart';
 import '../widgets/project_card.dart';
 import '../widgets/spring_button.dart';
-import '../services/storage_picker.dart';
 import '../widgets/morphing_capsule.dart';
+import '../services/github_workspace_service.dart';
+import '../services/supabase_data_service.dart';
+import '../services/realtime_sync_service.dart';
 import 'project_detail_screen.dart';
 
 class ProjectsScreen extends StatefulWidget {
@@ -26,6 +29,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   String _searchTerm = '';
   String _selectedCategory = 'All';
   String _selectedDifficulty = 'All';
+  final List<Project> _linkedProjects = [];
+  bool _loadingLinkedProjects = true;
+  VoidCallback? _stopRealtime;
+  Timer? _realtimeRefreshTimer;
 
   final List<String> _categories = [
     'All',
@@ -45,21 +52,76 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadLinkedProjects();
+    _stopRealtime = RealtimeSyncService.instance.subscribe(
+      const {'workspace_projects', 'workspace_files'},
+      (_) {
+        _realtimeRefreshTimer?.cancel();
+        _realtimeRefreshTimer =
+            Timer(const Duration(milliseconds: 250), _loadLinkedProjects);
+      },
+    );
+  }
+
+  Future<void> _loadLinkedProjects() async {
+    try {
+      final rows = await SupabaseDataService.fetchGitHubWorkspaceProjects();
+      final projects = rows.map(_projectFromWorkspaceRow).toList();
+      if (!mounted) return;
+      setState(() {
+        _linkedProjects
+          ..clear()
+          ..addAll(projects);
+        _syncProjectsToWorkspace(projects);
+        _loadingLinkedProjects = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingLinkedProjects = false);
+    }
+  }
+
+  Project _projectFromWorkspaceRow(Map<String, dynamic> row) {
+    return Project.fromWorkspaceRow(row);
+  }
+
+  void _syncProjectsToWorkspace(List<Project> projects) {
+    for (final project in projects) {
+      MockData.mockProjects.removeWhere((item) => item.id == project.id);
+      MockData.mockProjects.insert(0, project);
+    }
+  }
+
+  @override
   void dispose() {
+    _stopRealtime?.call();
+    _realtimeRefreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
   List<Project> get _filteredProjects {
-    return MockData.mockProjects.where((project) {
+    final linkedIds = _linkedProjects.map((project) => project.id).toSet();
+    final allProjects = [
+      ..._linkedProjects,
+      ...MockData.mockProjects
+          .where((project) => !linkedIds.contains(project.id)),
+    ];
+    return allProjects.where((project) {
       final matchesSearch = _searchTerm.isEmpty ||
           project.title.toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          project.description.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          project.description
+              .toLowerCase()
+              .contains(_searchTerm.toLowerCase()) ||
           project.category.toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          project.techStack.any((t) => t.toLowerCase().contains(_searchTerm.toLowerCase()));
+          project.techStack
+              .any((t) => t.toLowerCase().contains(_searchTerm.toLowerCase()));
 
-      final matchesCategory = _selectedCategory == 'All' || project.category == _selectedCategory;
-      final matchesDifficulty = _selectedDifficulty == 'All' || project.difficulty == _selectedDifficulty;
+      final matchesCategory =
+          _selectedCategory == 'All' || project.category == _selectedCategory;
+      final matchesDifficulty = _selectedDifficulty == 'All' ||
+          project.difficulty == _selectedDifficulty;
 
       return matchesSearch && matchesCategory && matchesDifficulty;
     }).toList();
@@ -108,29 +170,34 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
                 // ─── Projects Grid Listing ───
                 Expanded(
-                  child: filteredList.isEmpty
-                      ? _buildEmptyState()
-                      : GridView.builder(
-                          physics: const BouncingScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 440,
-                            mainAxisExtent: 310,
-                            crossAxisSpacing: 20,
-                            mainAxisSpacing: 20,
-                          ),
-                          itemCount: filteredList.length,
-                          itemBuilder: (context, index) {
-                            final project = filteredList[index];
-                            return ProjectCard(
-                              project: project,
-                              onDetails: () =>
-                                  _showProjectDetails(context, project),
-                              onOpenInWorkspace:
-                                  widget.onOpenProjectInWorkspace,
-                            );
-                          },
-                        ),
+                  child: _loadingLinkedProjects
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              color: Color(0xFF54C5F8)),
+                        )
+                      : filteredList.isEmpty
+                          ? _buildEmptyState()
+                          : GridView.builder(
+                              physics: const BouncingScrollPhysics(),
+                              gridDelegate:
+                                  const SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: 440,
+                                mainAxisExtent: 310,
+                                crossAxisSpacing: 20,
+                                mainAxisSpacing: 20,
+                              ),
+                              itemCount: filteredList.length,
+                              itemBuilder: (context, index) {
+                                final project = filteredList[index];
+                                return ProjectCard(
+                                  project: project,
+                                  onDetails: () =>
+                                      _showProjectDetails(context, project),
+                                  onOpenInWorkspace:
+                                      widget.onOpenProjectInWorkspace,
+                                );
+                              },
+                            ),
                 ),
               ],
             ),
@@ -180,11 +247,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final titleCtrl = TextEditingController();
     final descCtrl = TextEditingController();
     final gitUrlCtrl = TextEditingController();
+    final branchCtrl = TextEditingController();
+    final tokenCtrl = TextEditingController();
     String selectedCat = 'Dashboard';
     String selectedDiff = 'Intermediate';
-    PickedMediaResult? pickedFile;
-    const thumbnailUrl = 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=600';
+    const thumbnailUrl =
+        'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=600';
     final selectedTech = <String>['Flutter', 'Dart', 'Glassmorphism'];
+    GitRepositoryInfo? repositoryInfo;
+    List<GitTreeEntry> previewTree = [];
+    bool checkingRepository = false;
+    bool publishing = false;
+    String? repositoryError;
 
     showModalBottomSheet(
       context: context,
@@ -196,10 +270,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
             child: Container(
               height: MediaQuery.of(ctx).size.height * 0.88,
-              padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              padding: EdgeInsets.fromLTRB(
+                  20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
               decoration: BoxDecoration(
                 color: const Color(0xFF0C0E14).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(26)),
                 border: Border.all(color: Colors.white.withOpacity(0.18)),
               ),
               child: Column(
@@ -209,7 +285,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     child: Container(
                       width: 40,
                       height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -218,13 +296,19 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     children: [
                       Row(
                         children: const [
-                          Icon(LucideIcons.folderPlus, color: Color(0xFF54C5F8), size: 22),
+                          Icon(LucideIcons.folderPlus,
+                              color: Color(0xFF54C5F8), size: 22),
                           SizedBox(width: 8),
-                          Text('Upload / Import Project', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                          Text('Upload / Import Project',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold)),
                         ],
                       ),
                       IconButton(
-                        icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                        icon: const Icon(LucideIcons.x,
+                            color: Colors.white70, size: 20),
                         onPressed: () => Navigator.pop(ctx),
                       ),
                     ],
@@ -236,36 +320,47 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       physics: const BouncingScrollPhysics(),
                       children: [
                         // Project Title
-                        const Text('Project Title', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                        const Text('Project Title',
+                            style: TextStyle(
+                                color: Colors.white70, fontSize: 12.5)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: titleCtrl,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
                             hintText: 'e.g. NeoDesk Glass AI Dashboard',
                             hintStyle: const TextStyle(color: Colors.white38),
                             filled: true,
                             fillColor: Colors.white.withOpacity(0.06),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
                           ),
                         ),
                         const SizedBox(height: 14),
 
                         // Description
-                        const Text('Description', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                        const Text('Description',
+                            style: TextStyle(
+                                color: Colors.white70, fontSize: 12.5)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: descCtrl,
                           maxLines: 2,
-                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 13),
                           decoration: InputDecoration(
-                            hintText: 'Describe key capabilities, architecture, and live features...',
+                            hintText:
+                                'Describe key capabilities, architecture, and live features...',
                             hintStyle: const TextStyle(color: Colors.white38),
                             filled: true,
                             fillColor: Colors.white.withOpacity(0.06),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
                           ),
                         ),
                         const SizedBox(height: 14),
@@ -277,10 +372,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Category', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                  const Text('Category',
+                                      style: TextStyle(
+                                          color: Colors.white70, fontSize: 12)),
                                   const SizedBox(height: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
                                     decoration: BoxDecoration(
                                       color: Colors.white.withOpacity(0.06),
                                       borderRadius: BorderRadius.circular(12),
@@ -290,12 +388,22 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                       child: DropdownButton<String>(
                                         value: selectedCat,
                                         dropdownColor: const Color(0xFF14151C),
-                                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                                        style: const TextStyle(
+                                            color: Colors.white, fontSize: 13),
                                         isExpanded: true,
-                                        items: ['Dashboard', 'Productivity Tools', 'E-Commerce', 'Education', 'Portfolio', 'Social Media']
-                                            .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                                        items: [
+                                          'Dashboard',
+                                          'Productivity Tools',
+                                          'E-Commerce',
+                                          'Education',
+                                          'Portfolio',
+                                          'Social Media'
+                                        ]
+                                            .map((c) => DropdownMenuItem(
+                                                value: c, child: Text(c)))
                                             .toList(),
-                                        onChanged: (v) => setSheetState(() => selectedCat = v!),
+                                        onChanged: (v) => setSheetState(
+                                            () => selectedCat = v!),
                                       ),
                                     ),
                                   ),
@@ -307,10 +415,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Difficulty', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                  const Text('Difficulty',
+                                      style: TextStyle(
+                                          color: Colors.white70, fontSize: 12)),
                                   const SizedBox(height: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
                                     decoration: BoxDecoration(
                                       color: Colors.white.withOpacity(0.06),
                                       borderRadius: BorderRadius.circular(12),
@@ -320,12 +431,19 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                       child: DropdownButton<String>(
                                         value: selectedDiff,
                                         dropdownColor: const Color(0xFF14151C),
-                                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                                        style: const TextStyle(
+                                            color: Colors.white, fontSize: 13),
                                         isExpanded: true,
-                                        items: ['Beginner', 'Intermediate', 'Advanced']
-                                            .map((d) => DropdownMenuItem(value: d, child: Text(d)))
+                                        items: [
+                                          'Beginner',
+                                          'Intermediate',
+                                          'Advanced'
+                                        ]
+                                            .map((d) => DropdownMenuItem(
+                                                value: d, child: Text(d)))
                                             .toList(),
-                                        onChanged: (v) => setSheetState(() => selectedDiff = v!),
+                                        onChanged: (v) => setSheetState(
+                                            () => selectedDiff = v!),
                                       ),
                                     ),
                                   ),
@@ -336,57 +454,259 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                         ),
                         const SizedBox(height: 14),
 
-                        // Upload Source / Document
+                        // GitHub repository source
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.04),
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: Colors.white.withOpacity(0.1)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.1)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              const Text(
+                                'GitHub repository',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'Only repository metadata is saved in Supabase. Source files stay in GitHub.',
+                                style: TextStyle(
+                                    color: Colors.white54, fontSize: 11.5),
+                              ),
+                              const SizedBox(height: 10),
+                              TextField(
+                                controller: gitUrlCtrl,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 12.5),
+                                decoration: InputDecoration(
+                                  hintText:
+                                      'https://github.com/owner/repository',
+                                  hintStyle:
+                                      const TextStyle(color: Colors.white38),
+                                  prefixIcon: const Icon(LucideIcons.gitBranch,
+                                      color: Colors.white60, size: 16),
+                                  filled: true,
+                                  fillColor: Colors.white.withOpacity(0.04),
+                                  border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 8),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text('Package / Archive (.zip / code)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: branchCtrl,
+                                      style: const TextStyle(
+                                          color: Colors.white, fontSize: 12.5),
+                                      decoration: InputDecoration(
+                                        hintText: 'Branch (auto-detected)',
+                                        hintStyle: const TextStyle(
+                                            color: Colors.white38),
+                                        filled: true,
+                                        fillColor:
+                                            Colors.white.withOpacity(0.04),
+                                        border: OutlineInputBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(10)),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
                                   SpringButton(
-                                    onTap: () async {
-                                      final pick = await getStoragePicker().pickDocument();
-                                      if (pick != null) {
-                                        setSheetState(() => pickedFile = pick);
-                                      }
-                                    },
-                                    child: Row(
-                                      children: const [
-                                        Icon(LucideIcons.fileCode, color: Color(0xFF54C5F8), size: 14),
-                                        SizedBox(width: 4),
-                                        Text('Choose File', style: TextStyle(color: Color(0xFF54C5F8), fontSize: 12, fontWeight: FontWeight.bold)),
-                                      ],
+                                    onTap: checkingRepository
+                                        ? null
+                                        : () async {
+                                            setSheetState(() {
+                                              checkingRepository = true;
+                                              repositoryError = null;
+                                            });
+                                            try {
+                                              if (tokenCtrl.text
+                                                  .trim()
+                                                  .isNotEmpty) {
+                                                GithubWorkspaceService
+                                                    .setSessionToken(
+                                                        tokenCtrl.text);
+                                              }
+                                              final info =
+                                                  await GithubWorkspaceService
+                                                      .inspectRepository(
+                                                          gitUrlCtrl.text);
+                                              final branch =
+                                                  branchCtrl.text.trim().isEmpty
+                                                      ? info.defaultBranch
+                                                      : branchCtrl.text.trim();
+                                              final tree =
+                                                  await GithubWorkspaceService
+                                                      .fetchTree(
+                                                owner: info.owner,
+                                                repo: info.name,
+                                                branch: branch,
+                                              );
+                                              if (!modalCtx.mounted) return;
+                                              setSheetState(() {
+                                                repositoryInfo = info;
+                                                previewTree = tree;
+                                                branchCtrl.text = branch;
+                                                if (titleCtrl.text
+                                                    .trim()
+                                                    .isEmpty) {
+                                                  titleCtrl.text = info.name;
+                                                }
+                                                if (descCtrl.text
+                                                        .trim()
+                                                        .isEmpty &&
+                                                    info.description != null) {
+                                                  descCtrl.text =
+                                                      info.description!;
+                                                }
+                                              });
+                                            } catch (error) {
+                                              if (modalCtx.mounted) {
+                                                setSheetState(() =>
+                                                    repositoryError = error
+                                                        .toString()
+                                                        .replaceFirst(
+                                                            'Bad state: ', ''));
+                                              }
+                                            } finally {
+                                              if (modalCtx.mounted) {
+                                                setSheetState(() =>
+                                                    checkingRepository = false);
+                                              }
+                                            }
+                                          },
+                                    child: Container(
+                                      height: 48,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 14),
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF1D4ED8)
+                                            .withOpacity(0.75),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: checkingRepository
+                                          ? const SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Colors.white),
+                                            )
+                                          : const Text('Preview tree',
+                                              style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w700)),
                                     ),
                                   ),
                                 ],
                               ),
-                              if (pickedFile != null) ...[
-                                const SizedBox(height: 8),
-                                Text('Attached: ${pickedFile!.fileName} (${pickedFile!.formattedSize})',
-                                    style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.w600)),
-                              ],
                               const SizedBox(height: 8),
                               TextField(
-                                controller: gitUrlCtrl,
-                                style: const TextStyle(color: Colors.white, fontSize: 12.5),
+                                controller: tokenCtrl,
+                                obscureText: true,
+                                enableSuggestions: false,
+                                autocorrect: false,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 12.5),
                                 decoration: InputDecoration(
-                                  hintText: 'Or paste GitHub / Git repository URL',
-                                  hintStyle: const TextStyle(color: Colors.white38),
-                                  prefixIcon: const Icon(LucideIcons.gitBranch, color: Colors.white60, size: 16),
+                                  hintText: GithubWorkspaceService
+                                          .hasWriteCredential
+                                      ? 'GitHub credential available for this session'
+                                      : 'Fine-grained GitHub token (session only; required for private/push)',
+                                  hintStyle:
+                                      const TextStyle(color: Colors.white38),
+                                  prefixIcon: const Icon(
+                                      LucideIcons.lockKeyhole,
+                                      color: Colors.white60,
+                                      size: 16),
                                   filled: true,
                                   fillColor: Colors.white.withOpacity(0.04),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                  border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10)),
                                 ),
                               ),
+                              if (repositoryError != null) ...[
+                                const SizedBox(height: 8),
+                                Text(repositoryError!,
+                                    style: const TextStyle(
+                                        color: Color(0xFFF87171),
+                                        fontSize: 11.5)),
+                              ],
+                              if (repositoryInfo != null) ...[
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    const Icon(LucideIcons.checkCircle2,
+                                        size: 15, color: Color(0xFF10B981)),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        '${repositoryInfo!.owner}/${repositoryInfo!.name} • ${previewTree.length} entries',
+                                        style: const TextStyle(
+                                            color: Color(0xFF10B981),
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Container(
+                                  constraints:
+                                      const BoxConstraints(maxHeight: 190),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF09090B),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.white12),
+                                  ),
+                                  child: ListView(
+                                    shrinkWrap: true,
+                                    children:
+                                        previewTree.take(100).map((entry) {
+                                      final depth =
+                                          '/'.allMatches(entry.path).length;
+                                      return Padding(
+                                        padding: EdgeInsets.fromLTRB(
+                                            10 + depth * 12.0, 5, 8, 5),
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              entry.isDirectory
+                                                  ? LucideIcons.folder
+                                                  : LucideIcons.fileCode,
+                                              size: 13,
+                                              color: entry.isDirectory
+                                                  ? const Color(0xFFFBBF24)
+                                                  : Colors.white54,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                entry.path.split('/').last,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                    color: Colors.white70,
+                                                    fontSize: 11.5),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -395,48 +715,87 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     ),
                   ),
 
-                  // Publish Project Button
+                  // Link repository button
                   SpringButton(
-                    onTap: () {
-                      final title = titleCtrl.text.trim().isNotEmpty ? titleCtrl.text.trim() : 'New Custom Project';
-                      final desc = descCtrl.text.trim().isNotEmpty ? descCtrl.text.trim() : 'Interactive production-ready template with reactive components.';
-                      final newProj = Project(
-                        id: 'proj_${DateTime.now().millisecondsSinceEpoch}',
-                        title: title,
-                        category: selectedCat,
-                        difficulty: selectedDiff,
-                        description: desc,
-                        features: [
-                          'Modular state architecture and responsive fluid layouts',
-                          'Dark liquid glass theme with real-time blur shaders',
-                          'Full source files with test suites ready to deploy',
-                        ],
-                        techStack: selectedTech,
-                        estimatedTime: '3-4 hours',
-                        thumbnailUrl: thumbnailUrl,
-                        htmlTemplate: '<div class="glass-app"><h1>$title</h1></div>',
-                        cssTemplate: 'body { background: #09090b; color: white; }',
-                        jsTemplate: 'console.log("$title loaded successfully");',
-                        isFeatured: true,
-                      );
-
-                      setState(() {
-                        MockData.mockProjects.insert(0, newProj);
-                      });
-
-                      Navigator.pop(ctx);
-                      MorphingCapsule.show(
-                        context,
-                        icon: LucideIcons.checkCheck,
-                        label: 'Project published to library!',
-                        color: const Color(0xFF54C5F8),
-                      );
-                    },
+                    onTap: publishing || repositoryInfo == null
+                        ? null
+                        : () async {
+                            setSheetState(() => publishing = true);
+                            try {
+                              if (tokenCtrl.text.trim().isNotEmpty) {
+                                GithubWorkspaceService.setSessionToken(
+                                    tokenCtrl.text);
+                              }
+                              final info = repositoryInfo!;
+                              final title = titleCtrl.text.trim().isNotEmpty
+                                  ? titleCtrl.text.trim()
+                                  : info.name;
+                              final desc = descCtrl.text.trim().isNotEmpty
+                                  ? descCtrl.text.trim()
+                                  : 'Live GitHub repository ${info.owner}/${info.name}';
+                              final row = await SupabaseDataService
+                                  .linkGitHubWorkspaceProject(
+                                projectName: title,
+                                description: desc,
+                                repoUrl: info.url,
+                                branch: branchCtrl.text.trim(),
+                                owner: info.owner,
+                                repoName: info.name,
+                              );
+                              final newProject = Project(
+                                id: row['id'].toString(),
+                                title: title,
+                                category: selectedCat,
+                                difficulty: selectedDiff,
+                                description: desc,
+                                features: const [
+                                  'Live GitHub file tree',
+                                  'On-demand workspace loading',
+                                  'Push commits to GitHub'
+                                ],
+                                techStack: selectedTech,
+                                estimatedTime: 'Live repository',
+                                thumbnailUrl: thumbnailUrl,
+                                htmlTemplate: '',
+                                cssTemplate: '',
+                                jsTemplate: '',
+                                isFeatured: true,
+                                gitRepoUrl: info.url,
+                                gitBranch: branchCtrl.text.trim(),
+                                gitOwner: info.owner,
+                                gitRepoName: info.name,
+                              );
+                              if (!mounted) return;
+                              setState(() {
+                                _linkedProjects.removeWhere(
+                                    (project) => project.id == newProject.id);
+                                _linkedProjects.insert(0, newProject);
+                                _syncProjectsToWorkspace([newProject]);
+                              });
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              MorphingCapsule.show(
+                                context,
+                                icon: LucideIcons.checkCheck,
+                                label: 'GitHub repository linked',
+                                color: const Color(0xFF54C5F8),
+                              );
+                            } catch (error) {
+                              if (modalCtx.mounted) {
+                                setSheetState(() {
+                                  repositoryError = error
+                                      .toString()
+                                      .replaceFirst('Bad state: ', '');
+                                  publishing = false;
+                                });
+                              }
+                            }
+                          },
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
+                        gradient: const LinearGradient(
+                            colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
@@ -447,7 +806,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                         ],
                       ),
                       alignment: Alignment.center,
-                      child: const Text('Publish Project', style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.bold)),
+                      child: publishing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Link GitHub Repository',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],
@@ -521,7 +891,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   shape: BoxShape.circle,
                   color: Colors.white.withOpacity(0.1),
                 ),
-                child: const Icon(LucideIcons.x, size: 12, color: Color(0xFFD1D5DB)),
+                child: const Icon(LucideIcons.x,
+                    size: 12, color: Color(0xFFD1D5DB)),
               ),
             )
           else
@@ -542,7 +913,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     // Difficulties capsule dropdown
     final difficultyDropdown = _buildCapsulePopup(
       icon: LucideIcons.slidersHorizontal,
-      label: _selectedDifficulty == 'All' ? 'All Difficulties' : _selectedDifficulty,
+      label: _selectedDifficulty == 'All'
+          ? 'All Difficulties'
+          : _selectedDifficulty,
       items: _difficulties,
       selectedItem: _selectedDifficulty,
       onSelected: (diff) => setState(() => _selectedDifficulty = diff),
@@ -599,7 +972,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       itemBuilder: (context) {
         return items.map((item) {
           final isCurrent = item == selectedItem;
-          final displayText = item == 'All' ? (label.contains('Categories') ? 'All Categories' : 'All Difficulties') : item;
+          final displayText = item == 'All'
+              ? (label.contains('Categories')
+                  ? 'All Categories'
+                  : 'All Difficulties')
+              : item;
 
           return PopupMenuItem<String>(
             value: item,
@@ -766,7 +1143,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 ),
               ),
               IconButton(
-                icon: const Icon(LucideIcons.x, color: Color(0xFF9CA3AF), size: 18),
+                icon: const Icon(LucideIcons.x,
+                    color: Color(0xFF9CA3AF), size: 18),
                 onPressed: () => Navigator.pop(context),
               ),
             ],
@@ -782,11 +1160,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.white.withOpacity(0.1)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.1)),
                         ),
                         child: Text(
                           project.category,
@@ -799,11 +1179,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       ),
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.white.withOpacity(0.1)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.1)),
                         ),
                         child: Text(
                           project.difficulty,
@@ -817,7 +1199,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       const SizedBox(width: 8),
                       Row(
                         children: [
-                          const Icon(LucideIcons.clock, size: 12, color: Color(0xFF9CA3AF)),
+                          const Icon(LucideIcons.clock,
+                              size: 12, color: Color(0xFF9CA3AF)),
                           const SizedBox(width: 4),
                           Text(
                             project.estimatedTime,
@@ -870,7 +1253,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                         children: [
                           const Padding(
                             padding: EdgeInsets.only(top: 2),
-                            child: Icon(LucideIcons.check, size: 14, color: Color(0xFF10B981)),
+                            child: Icon(LucideIcons.check,
+                                size: 14, color: Color(0xFF10B981)),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -903,11 +1287,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     runSpacing: 8,
                     children: project.techStack.map((tech) {
                       return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.06),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.white.withOpacity(0.1)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.1)),
                         ),
                         child: Text(
                           tech,
@@ -939,7 +1325,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               },
               borderRadius: BorderRadius.circular(10),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
@@ -965,6 +1352,152 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           ],
         );
       },
+    );
+  }
+
+  Future<void> _showGitHubProjectDetails(Project project) async {
+    final treeFuture = GithubWorkspaceService.fetchTree(
+      owner: project.gitOwner!,
+      repo: project.gitRepoName!,
+      branch: project.gitBranch ?? 'main',
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: const Color(0xFF111318),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Colors.white.withOpacity(0.14)),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720, maxHeight: 680),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(LucideIcons.folderGit2,
+                        color: Color(0xFF54C5F8)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(project.title,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800)),
+                          Text(
+                            '${project.gitOwner}/${project.gitRepoName} • ${project.gitBranch}',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(LucideIcons.x, color: Colors.white70),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Text('Live repository tree',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: FutureBuilder<List<GitTreeEntry>>(
+                    future: treeFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(
+                            child: CircularProgressIndicator(
+                                color: Color(0xFF54C5F8)));
+                      }
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: Text(
+                            snapshot.error
+                                .toString()
+                                .replaceFirst('Bad state: ', ''),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Color(0xFFF87171)),
+                          ),
+                        );
+                      }
+                      final entries = snapshot.data ?? const [];
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF09090B),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: ListView.builder(
+                          itemCount: entries.length,
+                          itemBuilder: (context, index) {
+                            final entry = entries[index];
+                            final depth = '/'.allMatches(entry.path).length;
+                            return Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                  12 + depth * 14.0, 6, 10, 6),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    entry.isDirectory
+                                        ? LucideIcons.folder
+                                        : LucideIcons.fileCode,
+                                    size: 14,
+                                    color: entry.isDirectory
+                                        ? const Color(0xFFFBBF24)
+                                        : Colors.white54,
+                                  ),
+                                  const SizedBox(width: 7),
+                                  Expanded(
+                                    child: Text(
+                                      entry.path.split('/').last,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          color: Colors.white70, fontSize: 12),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SpringButton(
+                  onTap: () {
+                    Navigator.pop(dialogContext);
+                    widget.onOpenProjectInWorkspace(project.id);
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                          colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text('Load Project in Workspace',
+                        style: TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

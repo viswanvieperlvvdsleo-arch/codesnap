@@ -9,7 +9,7 @@ import '../utils/app_animations.dart';
 import 'spring_button.dart';
 import '../screens/notifications_screen.dart';
 import '../screens/admin_dashboard_screen.dart';
-
+import '../services/upload_status_service.dart';
 
 /// ─── Header ──────────────────────────────────────────────────────────────────
 /// Premium header with:
@@ -91,7 +91,8 @@ class _HeaderState extends State<Header> {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 4),
                       child: Text(
                         '<>',
                         style: TextStyle(
@@ -145,20 +146,11 @@ class _HeaderState extends State<Header> {
                           borderRadius: BorderRadius.circular(14),
                           side: const BorderSide(color: Color(0x26FFFFFF)),
                         ),
-                        child: CircleAvatar(
-                          radius: 18,
-                          backgroundColor: Colors.white.withOpacity(0.15),
-                          backgroundImage: (user != null && user.avatarUrl.isNotEmpty)
-                              ? NetworkImage(user.avatarUrl)
-                              : null,
-                          child: (user == null || user.avatarUrl.isEmpty)
-                              ? Text(
-                                  (user?.name.isNotEmpty == true)
-                                      ? user!.name[0].toUpperCase()
-                                      : 'U',
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                                )
-                              : null,
+                        child: _UploadProfileAvatar(
+                          imageUrl: user?.avatarUrl ?? '',
+                          initial: (user?.name.isNotEmpty == true)
+                              ? user!.name[0].toUpperCase()
+                              : 'U',
                         ),
                         onSelected: (value) {
                           if (value == 'logout') {
@@ -168,7 +160,8 @@ class _HeaderState extends State<Header> {
                           } else if (value == 'admin') {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+                              MaterialPageRoute(
+                                  builder: (_) => const AdminDashboardScreen()),
                             );
                           }
                         },
@@ -209,7 +202,9 @@ class _HeaderState extends State<Header> {
                                     size: 18, color: Color(0xFFFFD700)),
                                 SizedBox(width: 10),
                                 Text('Admin Console',
-                                    style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.bold)),
+                                    style: TextStyle(
+                                        color: Color(0xFFFFD700),
+                                        fontWeight: FontWeight.bold)),
                               ]),
                             ),
                           ],
@@ -238,6 +233,99 @@ class _HeaderState extends State<Header> {
   }
 }
 
+class _UploadProfileAvatar extends StatelessWidget {
+  const _UploadProfileAvatar({
+    required this.imageUrl,
+    required this.initial,
+  });
+
+  final String imageUrl;
+  final String initial;
+
+  @override
+  Widget build(BuildContext context) {
+    final upload = UploadStatusService.instance;
+    return AnimatedBuilder(
+      animation: upload,
+      builder: (context, _) {
+        final color = switch (upload.state) {
+          UploadState.uploading => const Color(0xFFFFD700),
+          UploadState.success => const Color(0xFF00E676),
+          UploadState.failed || UploadState.canceled => const Color(0xFFFF5252),
+          UploadState.idle => Colors.white,
+        };
+        final emphasized = upload.state != UploadState.idle;
+        return Tooltip(
+          message: upload.label.isEmpty ? 'Profile' : upload.label,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 1, end: emphasized ? 1.1 : 1),
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutBack,
+            builder: (context, scale, child) =>
+                Transform.scale(scale: scale, child: child),
+            child: SizedBox.square(
+              dimension: 42,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox.square(
+                    dimension: 42,
+                    child: CircularProgressIndicator(
+                      value: upload.state == UploadState.uploading
+                          ? upload.progress
+                          : 1,
+                      strokeWidth: 2.5,
+                      backgroundColor: Colors.white.withOpacity(0.16),
+                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                    ),
+                  ),
+                  CircleAvatar(
+                    radius: 17,
+                    backgroundColor: Colors.white.withOpacity(0.15),
+                    backgroundImage:
+                        imageUrl.isNotEmpty ? NetworkImage(imageUrl) : null,
+                    child: imageUrl.isEmpty
+                        ? Text(
+                            initial,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          )
+                        : null,
+                  ),
+                  if (upload.state == UploadState.success)
+                    const Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Icon(
+                        LucideIcons.circleCheck,
+                        color: Color(0xFF00E676),
+                        size: 13,
+                      ),
+                    ),
+                  if (upload.state == UploadState.failed ||
+                      upload.state == UploadState.canceled)
+                    const Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Icon(
+                        LucideIcons.circleX,
+                        color: Color(0xFFFF5252),
+                        size: 13,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 // ─── Spring Nav Bar ───────────────────────────────────────────────────────────
 
 class _SpringNavBar extends StatefulWidget {
@@ -257,7 +345,16 @@ class _SpringNavBarState extends State<_SpringNavBar>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
 
-  static const _labels = ['Home', 'Chat', 'People', 'Arena', 'Notes', 'Projects', 'Workspace', 'Profile'];
+  static const _labels = [
+    'Home',
+    'Chat',
+    'People',
+    'Arena',
+    'Notes',
+    'Projects',
+    'Workspace',
+    'Profile'
+  ];
   static const _icons = [
     LucideIcons.home,
     LucideIcons.messageSquare,
@@ -313,8 +410,7 @@ class _SpringNavBarState extends State<_SpringNavBar>
             child: AnimatedContainer(
               duration: AppAnimations.quick,
               curve: AppAnimations.snappy,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: isSelected
                     ? ThemeProvider.primaryGold.withOpacity(0.1)
@@ -340,9 +436,8 @@ class _SpringNavBarState extends State<_SpringNavBar>
                   AnimatedDefaultTextStyle(
                     duration: AppAnimations.quick,
                     style: TextStyle(
-                      fontWeight: isSelected
-                          ? FontWeight.w700
-                          : FontWeight.normal,
+                      fontWeight:
+                          isSelected ? FontWeight.w700 : FontWeight.normal,
                       color: isSelected
                           ? ThemeProvider.primaryGold
                           : ThemeProvider.mauve,
@@ -411,7 +506,6 @@ class _AnimatedNotificationBellState extends State<_AnimatedNotificationBell>
           ),
         );
       },
-
       child: Stack(
         children: [
           Padding(

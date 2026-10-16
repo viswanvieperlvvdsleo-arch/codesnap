@@ -90,6 +90,7 @@ class UserProfile {
   String roleBadge; // e.g. "Pro Contributor", "Mentor", "Core Dev"
   String department; // e.g. "CSE · 3rd Year"
   String location;
+  String githubHandle;
   int followersCount;
   int followingCount;
   int postsCount;
@@ -114,6 +115,7 @@ class UserProfile {
     required this.roleBadge,
     this.department = '',
     this.location = '',
+    this.githubHandle = '',
     required this.followersCount,
     required this.followingCount,
     required this.postsCount,
@@ -127,8 +129,51 @@ class UserProfile {
     List<dynamic>? media,
     List<UserPostItem>? posts,
     List<UserProjectItem>? projects,
-  })  : skills = skills ?? tags ?? const [],
+  })  : skills = skills ?? tags,
         mediaItems = mediaItems ?? const [],
         posts = posts ?? const [],
         projects = projects ?? const [];
+
+  factory UserProfile.fromPeopleDirectory(Map<String, dynamic> row) {
+    int asInt(Object? value) => value is num
+        ? value.toInt()
+        : int.tryParse(value?.toString() ?? '') ?? 0;
+    final rawSkills = row['skills'];
+    final skills = rawSkills is List
+        ? rawSkills
+            .map((value) => value.toString().trim())
+            .where((value) => value.isNotEmpty)
+            .toList(growable: false)
+        : <String>[];
+    final username = row['username']?.toString().trim() ?? '';
+    final fullName = row['full_name']?.toString().trim() ?? '';
+    final department = row['department']?.toString().trim() ?? '';
+
+    return UserProfile(
+      id: row['id']?.toString() ?? '',
+      name: fullName.isNotEmpty
+          ? fullName
+          : (username.isNotEmpty ? username : 'Developer'),
+      handle: username.isEmpty ? '' : '@$username',
+      avatarUrl: row['avatar_url']?.toString().trim() ?? '',
+      bannerUrl: '',
+      headline: row['headline']?.toString().trim() ?? '',
+      bio: row['bio']?.toString().trim() ?? '',
+      roleBadge: department.isEmpty ? 'Member' : department,
+      department: department,
+      location: row['location']?.toString().trim() ?? '',
+      githubHandle: row['github_handle']?.toString().trim() ?? '',
+      followersCount: asInt(row['snapped_count'] ?? row['followers_count']),
+      followingCount: asInt(row['snapping_count'] ?? row['following_count']),
+      postsCount: asInt(row['posts_count']),
+      badges: const [],
+      tags: skills,
+      skills: skills,
+      isOnline: false,
+      isFollowing: row['is_snapping'] == true,
+      mediaItems: const [],
+      posts: const [],
+      projects: const [],
+    );
+  }
 }

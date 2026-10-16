@@ -14,12 +14,12 @@ import 'chat_screen.dart';
 import 'people_screen.dart';
 
 // ── Glass constants matching the Run button ────────────────────────────────────
-const _kBg      = Color(0xFF09090B);
-const _kGlass   = Color(0x14FFFFFF); // rgba(255,255,255,0.08)
-const _kBorder  = Color(0x26FFFFFF); // rgba(255,255,255,0.15)
-const _kHigh    = Color(0x38FFFFFF); // rgba(255,255,255,0.22)
-const _kBlur    = 40.0;
-const _kRadius  = 30.0;
+const _kBg = Color(0xFF09090B);
+const _kGlass = Color(0x14FFFFFF); // rgba(255,255,255,0.08)
+const _kBorder = Color(0x26FFFFFF); // rgba(255,255,255,0.15)
+const _kHigh = Color(0x38FFFFFF); // rgba(255,255,255,0.22)
+const _kBlur = 40.0;
+const _kRadius = 30.0;
 
 class MainLayoutScreen extends StatefulWidget {
   const MainLayoutScreen({super.key});
@@ -33,7 +33,6 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
   int _currentIndex = 0;
   final List<int> _tabHistory = [0];
   bool _menuVisible = true;
-
 
   // For swipe-to-hide gesture tracking
   double _swipeDeltaY = 0;
@@ -70,7 +69,7 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
       duration: const Duration(milliseconds: 240),
       value: 1.0,
     );
-    _menuFade  = CurvedAnimation(parent: _menuAnim, curve: AppAnimations.snappy);
+    _menuFade = CurvedAnimation(parent: _menuAnim, curve: AppAnimations.snappy);
     _menuSlide = Tween<Offset>(
       begin: const Offset(0, 1.5),
       end: Offset.zero,
@@ -84,15 +83,14 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
   }
 
   void _navigateToTab(int index, {String? taskId, String? projectId}) {
-    if (_currentIndex == index) return;
+    if (_currentIndex == index && taskId == null && projectId == null) return;
     setState(() {
       _tabHistory.add(index);
       _currentIndex = index;
-      _selectedTaskId  = taskId;
+      _selectedTaskId = taskId;
       _selectedProjectId = projectId;
     });
   }
-
 
   void _showMenu() {
     setState(() => _menuVisible = true);
@@ -135,7 +133,8 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
                     setState(() => _isChatExpanded = expanded);
                   },
                   onActiveConversationChanged: (active) {
-                    if (mounted) setState(() => _isInsideChatConversation = active);
+                    if (mounted)
+                      setState(() => _isInsideChatConversation = active);
                   },
                 ),
               ),
@@ -175,6 +174,8 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
           WorkspaceScreen(
             initialTaskId: _selectedTaskId,
             initialProjectId: _selectedProjectId,
+            onOpenProjects: () => _navigateToTab(5),
+            onOpenRecentProject: (id) => _navigateToTab(6, projectId: id),
             onClearSelection: () {
               _selectedTaskId = null;
               _selectedProjectId = null;
@@ -211,6 +212,8 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
         WorkspaceScreen(
           initialTaskId: _selectedTaskId,
           initialProjectId: _selectedProjectId,
+          onOpenProjects: () => _navigateToTab(5),
+          onOpenRecentProject: (id) => _navigateToTab(6, projectId: id),
           onClearSelection: () {
             _selectedTaskId = null;
             _selectedProjectId = null;
@@ -229,10 +232,10 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
 
     // On laptop view (isDesktop), keep the top header visible even on Workspace so top menu buttons never vanish!
     // On mobile phone view, remove the top header for Chat and Workspace for maximum screen space.
-    final hideTopHeader = !isDesktop && (_currentIndex == 1 || _currentIndex == 6);
+    final hideTopHeader =
+        !isDesktop && (_currentIndex == 1 || _currentIndex == 6);
 
     final isKeyboardOpen = media.viewInsets.bottom > 0;
-
 
     // If on workspace in phone landscape or in an active mobile chat conversation, or if keyboard is visible, hide bottom nav
     final hideBottomNav = (isLandscape && _currentIndex == 6) ||
@@ -240,7 +243,9 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
         isKeyboardOpen;
 
     return PopScope(
-      canPop: _currentIndex == 0 && !_isInsideChatConversation && _tabHistory.length <= 1,
+      canPop: _currentIndex == 0 &&
+          !_isInsideChatConversation &&
+          _tabHistory.length <= 1,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         // Priority 1: If inside active chat conversation on mobile, exit conversation back to contacts!
@@ -271,7 +276,6 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
           return;
         }
       },
-
       child: Scaffold(
         backgroundColor: _kBg,
         appBar: hideTopHeader
@@ -280,58 +284,58 @@ class _MainLayoutScreenState extends State<MainLayoutScreen>
                 activeIndex: _currentIndex,
                 onTabChanged: _navigateToTab,
               ),
-      body: GestureDetector(
-        // Detect vertical swipes anywhere on body to show/hide nav
-        onVerticalDragUpdate: (d) {
-          _swipeDeltaY += d.delta.dy;
-        },
-        onVerticalDragEnd: (_) {
-          if (_swipeDeltaY > _swipeThreshold && _menuVisible) {
-            // Swiped DOWN → hide
-            _hideMenu();
-          } else if (_swipeDeltaY < -_swipeThreshold && !_menuVisible) {
-            // Swiped UP → show
-            _showMenu();
-          }
-          _swipeDeltaY = 0;
-        },
-        child: Stack(
-          children: [
-            // ── Main content (Split on Desktop for Home/Chat, separate on Mobile) ──
-            Positioned.fill(
-              child: Container(
-                color: _kBg,
-                child: _buildContent(isDesktop),
-              ),
-            ),
-
-            // ── Glass horizontal bottom nav bar (Mobile only) ─────────────
-            if (!isDesktop && _menuVisible && !hideBottomNav)
-              Positioned(
-                left: 20,
-                right: 20,
-                bottom: 24,
-                child: SlideTransition(
-                  position: _menuSlide,
-                  child: FadeTransition(
-                    opacity: _menuFade,
-                    child: _buildGlassNavBar(),
-                  ),
+        body: GestureDetector(
+          // Detect vertical swipes anywhere on body to show/hide nav
+          onVerticalDragUpdate: (d) {
+            _swipeDeltaY += d.delta.dy;
+          },
+          onVerticalDragEnd: (_) {
+            if (_swipeDeltaY > _swipeThreshold && _menuVisible) {
+              // Swiped DOWN → hide
+              _hideMenu();
+            } else if (_swipeDeltaY < -_swipeThreshold && !_menuVisible) {
+              // Swiped UP → show
+              _showMenu();
+            }
+            _swipeDeltaY = 0;
+          },
+          child: Stack(
+            children: [
+              // ── Main content (Split on Desktop for Home/Chat, separate on Mobile) ──
+              Positioned.fill(
+                child: Container(
+                  color: _kBg,
+                  child: _buildContent(isDesktop),
                 ),
               ),
 
-            if (!isDesktop && !_menuVisible && !hideBottomNav)
-              Positioned(
-                right: 24,
-                bottom: 24,
-                child: _buildCollapseButton(collapsed: true),
-              ),
-          ],
+              // ── Glass horizontal bottom nav bar (Mobile only) ─────────────
+              if (!isDesktop && _menuVisible && !hideBottomNav)
+                Positioned(
+                  left: 20,
+                  right: 20,
+                  bottom: 24,
+                  child: SlideTransition(
+                    position: _menuSlide,
+                    child: FadeTransition(
+                      opacity: _menuFade,
+                      child: _buildGlassNavBar(),
+                    ),
+                  ),
+                ),
+
+              if (!isDesktop && !_menuVisible && !hideBottomNav)
+                Positioned(
+                  right: 24,
+                  bottom: 24,
+                  child: _buildCollapseButton(collapsed: true),
+                ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // ── Full glass horizontal nav bar ──────────────────────────────────────────
   Widget _buildGlassNavBar() {

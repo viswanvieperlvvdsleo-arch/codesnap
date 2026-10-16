@@ -8,14 +8,16 @@ import '../widgets/full_screen_image_viewer.dart';
 import 'chat_screen.dart';
 import 'individual_chat_screen.dart';
 import 'user_profile_detail_screen.dart';
+import '../services/chat_service.dart';
 
 // ── Liquid Glass Color Tokens ────────────────────────────────────────────────
-const _kBgDark        = Color(0xFF09090B);
-const _kGlassSurface   = Color(0x14FFFFFF); // rgba(255,255,255,0.08)
-const _kGlassElevated  = Color(0x1FFFFFFF); // rgba(255,255,255,0.12)
-const _kGlassBorder    = Color(0x26FFFFFF); // rgba(255,255,255,0.15)
-const _kAccentBlue     = Color(0xFF4A68FF); // Vibrant primary action blue matching Image 5
-const _kAccentCyan     = Color(0xFF54C5F8);
+const _kBgDark = Color(0xFF09090B);
+const _kGlassSurface = Color(0x14FFFFFF); // rgba(255,255,255,0.08)
+const _kGlassElevated = Color(0x1FFFFFFF); // rgba(255,255,255,0.12)
+const _kGlassBorder = Color(0x26FFFFFF); // rgba(255,255,255,0.15)
+const _kAccentBlue =
+    Color(0xFF4A68FF); // Vibrant primary action blue matching Image 5
+const _kAccentCyan = Color(0xFF54C5F8);
 
 class UserConnectionsScreen extends StatefulWidget {
   final UserProfile user;
@@ -54,9 +56,8 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
     );
 
     // Initialize list of users with exact handles and names matching the platform
-    final basePeople = MockData.mockPeople
-        .where((u) => u.id != widget.user.id)
-        .toList();
+    final basePeople =
+        MockData.mockPeople.where((u) => u.id != widget.user.id).toList();
 
     final customAccounts = [
       UserProfile(
@@ -65,8 +66,10 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         handle: 'viswanvieperlvvds',
         headline: 'WHO • ME',
         roleBadge: 'Admin',
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
-        bannerUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+        bannerUrl:
+            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
         isOnline: true,
         isFollowing: true,
         followersCount: 1420,
@@ -85,8 +88,10 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         handle: 'prabhatt_n07',
         headline: 'guddu⛅',
         roleBadge: 'Designer',
-        avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
-        bannerUrl: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+        bannerUrl:
+            'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800',
         isOnline: true,
         isFollowing: false,
         followersCount: 840,
@@ -105,8 +110,10 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         handle: 'gowtham401945',
         headline: 'gowtham Kumar',
         roleBadge: 'Developer',
-        avatarUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200',
-        bannerUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200',
+        bannerUrl:
+            'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800',
         isOnline: false,
         isFollowing: false,
         followersCount: 512,
@@ -125,8 +132,10 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         handle: 'sruthi_ghantasala',
         headline: 'sruthi😇',
         roleBadge: 'Frontend Dev',
-        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200',
-        bannerUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200',
+        bannerUrl:
+            'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
         isOnline: true,
         isFollowing: false,
         followersCount: 1200,
@@ -145,8 +154,10 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         handle: 'syam_7421',
         headline: 'syam',
         roleBadge: 'Coder',
-        avatarUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200',
-        bannerUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200',
+        bannerUrl:
+            'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800',
         isOnline: false,
         isFollowing: false,
         followersCount: 380,
@@ -165,8 +176,10 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         handle: 'adurthisiri',
         headline: 'Premakumari Adu...',
         roleBadge: 'Fullstack',
-        avatarUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200',
-        bannerUrl: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200',
+        bannerUrl:
+            'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800',
         isOnline: true,
         isFollowing: false,
         followersCount: 710,
@@ -185,8 +198,10 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         handle: 'nandhini.11117',
         headline: 'Nandhini',
         roleBadge: 'Creative Dev',
-        avatarUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200',
-        bannerUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200',
+        bannerUrl:
+            'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800',
         isOnline: true,
         isFollowing: false,
         followersCount: 950,
@@ -205,8 +220,10 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         handle: '_sairam_mallipudi_',
         headline: 'Sairam..🚩',
         roleBadge: 'Software Engineer',
-        avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200',
-        bannerUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200',
+        bannerUrl:
+            'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
         isOnline: true,
         isFollowing: true,
         followersCount: 1640,
@@ -249,42 +266,52 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
     });
   }
 
-  void _openChatWithUser(UserProfile targetUser) {
+  Future<void> _openChatWithUser(UserProfile targetUser) async {
     final store = ChatStateStore.instance;
-    ChatConversation? conv;
     try {
-      conv = store.conversations.firstWhere(
-        (c) =>
-            c.name.toLowerCase() == targetUser.name.toLowerCase() ||
-            c.name.toLowerCase() == targetUser.handle.toLowerCase() ||
-            c.id == targetUser.id,
-      );
-    } catch (_) {
-      conv = ChatConversation(
-        id: targetUser.id,
-        name: targetUser.handle.isNotEmpty ? targetUser.handle : targetUser.name,
-        role: targetUser.headline.isNotEmpty ? targetUser.headline : targetUser.roleBadge,
-        avatarUrl: targetUser.avatarUrl,
-        isOnline: targetUser.isOnline,
-        lastMessage: 'Tap to send message',
-        time: 'Now',
-        unreadCount: 0,
-        messages: [],
-      );
-      store.conversations.insert(0, conv);
-    }
+      final conversationId =
+          await ChatService.getOrCreateDirectConversation(targetUser.id);
+      if (!mounted) return;
+      ChatConversation conv;
+      try {
+        conv =
+            store.conversations.firstWhere((item) => item.id == conversationId);
+      } catch (_) {
+        conv = ChatConversation(
+          id: conversationId,
+          name: targetUser.handle.isNotEmpty
+              ? targetUser.handle
+              : targetUser.name,
+          role: targetUser.headline.isNotEmpty
+              ? targetUser.headline
+              : targetUser.roleBadge,
+          avatarUrl: targetUser.avatarUrl,
+          isOnline: targetUser.isOnline,
+          lastMessage: 'Tap to send message',
+          time: 'Now',
+          unreadCount: 0,
+          messages: [],
+        );
+        store.conversations.insert(0, conv);
+      }
 
-    store.selectedConversationId = conv.id;
+      store.selectedConversationId = conv.id;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (ctx) => IndividualChatScreen(
-          conversation: conv!,
-          defaultWallpaper: store.defaultWallpaper,
-          allConversations: store.conversations,
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (ctx) => IndividualChatScreen(
+            conversation: conv,
+            defaultWallpaper: store.defaultWallpaper,
+            allConversations: store.conversations,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open chat: $error')),
+      );
+    }
   }
 
   void _openUserProfile(UserProfile targetUser) {
@@ -299,18 +326,24 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
     List<UserProfile> list;
     switch (tabIndex) {
       case 0: // Mutual
-        list = _allAccounts.where((u) => _followingUserIds.contains(u.id)).toList();
+        list = _allAccounts
+            .where((u) => _followingUserIds.contains(u.id))
+            .toList();
         if (list.isEmpty) list = _allAccounts.take(3).toList();
         break;
       case 1: // Followers (Snapped)
         list = _allAccounts;
         break;
       case 2: // Following (Snapping)
-        list = _allAccounts.where((u) => _followingUserIds.contains(u.id) || u.isFollowing).toList();
+        list = _allAccounts
+            .where((u) => _followingUserIds.contains(u.id) || u.isFollowing)
+            .toList();
         if (list.isEmpty) list = _allAccounts.take(2).toList();
         break;
       case 3: // Suggested
-        list = _allAccounts.where((u) => !_followingUserIds.contains(u.id)).toList();
+        list = _allAccounts
+            .where((u) => !_followingUserIds.contains(u.id))
+            .toList();
         break;
       default:
         list = _allAccounts;
@@ -318,10 +351,12 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
 
     if (_searchQuery.trim().isNotEmpty) {
       final q = _searchQuery.toLowerCase().trim();
-      list = list.where((u) =>
-          u.name.toLowerCase().contains(q) ||
-          u.handle.toLowerCase().contains(q) ||
-          u.headline.toLowerCase().contains(q)).toList();
+      list = list
+          .where((u) =>
+              u.name.toLowerCase().contains(q) ||
+              u.handle.toLowerCase().contains(q) ||
+              u.headline.toLowerCase().contains(q))
+          .toList();
     }
 
     return list;
@@ -353,7 +388,8 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
                         shape: BoxShape.circle,
                         border: Border.all(color: _kGlassBorder),
                       ),
-                      child: const Icon(LucideIcons.arrowLeft, color: Colors.white, size: 20),
+                      child: const Icon(LucideIcons.arrowLeft,
+                          color: Colors.white, size: 20),
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -419,17 +455,20 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Row(
                   children: [
-                    const Icon(LucideIcons.search, color: Color(0xFF8E8E93), size: 17),
+                    const Icon(LucideIcons.search,
+                        color: Color(0xFF8E8E93), size: 17),
                     const SizedBox(width: 10),
                     Expanded(
                       child: TextField(
                         controller: _searchController,
                         onChanged: (val) => setState(() => _searchQuery = val),
-                        style: const TextStyle(color: Colors.white, fontSize: 13.5),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 13.5),
                         cursorColor: Colors.white,
                         decoration: const InputDecoration(
                           hintText: 'Search',
-                          hintStyle: TextStyle(color: Color(0xFF8E8E93), fontSize: 13.5),
+                          hintStyle: TextStyle(
+                              color: Color(0xFF8E8E93), fontSize: 13.5),
                           border: InputBorder.none,
                           isDense: true,
                           contentPadding: EdgeInsets.zero,
@@ -442,7 +481,8 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
                           _searchController.clear();
                           setState(() => _searchQuery = '');
                         },
-                        child: const Icon(LucideIcons.x, color: Colors.white60, size: 15),
+                        child: const Icon(LucideIcons.x,
+                            color: Colors.white60, size: 15),
                       ),
                   ],
                 ),
@@ -453,7 +493,8 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
             Expanded(
               child: TabBarView(
                 controller: _tabController,
-                children: List.generate(4, (tabIdx) => _buildAccountsList(tabIdx)),
+                children:
+                    List.generate(4, (tabIdx) => _buildAccountsList(tabIdx)),
               ),
             ),
           ],
@@ -470,11 +511,15 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.users, size: 44, color: Colors.white.withOpacity(0.2)),
+            Icon(LucideIcons.users,
+                size: 44, color: Colors.white.withOpacity(0.2)),
             const SizedBox(height: 12),
             Text(
-              _searchQuery.isNotEmpty ? 'No accounts match "$_searchQuery"' : 'No accounts found',
-              style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13.5),
+              _searchQuery.isNotEmpty
+                  ? 'No accounts match "$_searchQuery"'
+                  : 'No accounts found',
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.55), fontSize: 13.5),
             ),
           ],
         ),
@@ -495,7 +540,8 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
             children: [
               // User Avatar
               GestureDetector(
-                onTap: () => FullScreenImageViewer.show(context, imageUrl: account.avatarUrl, title: account.name),
+                onTap: () => FullScreenImageViewer.show(context,
+                    imageUrl: account.avatarUrl, title: account.name),
                 child: CircleAvatar(
                   radius: 26,
                   backgroundColor: const Color(0xFF27272A),
@@ -514,7 +560,9 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        account.handle.isNotEmpty ? account.handle : account.name,
+                        account.handle.isNotEmpty
+                            ? account.handle
+                            : account.name,
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 14,
@@ -526,7 +574,9 @@ class _UserConnectionsScreenState extends State<UserConnectionsScreen>
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        account.headline.isNotEmpty ? account.headline : account.name,
+                        account.headline.isNotEmpty
+                            ? account.headline
+                            : account.name,
                         style: const TextStyle(
                           color: Color(0xFF8E8E93),
                           fontSize: 12.5,

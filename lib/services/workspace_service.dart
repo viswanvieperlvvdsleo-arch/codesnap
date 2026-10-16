@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 // Conditional import: dart:io on native, our stub on web
@@ -75,7 +74,8 @@ button {
 }
 button:hover { transform: translateY(-2px); }''';
 
-  static const _js = '''document.getElementById('btn').addEventListener('click', () => {
+  static const _js =
+      '''document.getElementById('btn').addEventListener('click', () => {
   const out = document.getElementById('out');
   out.textContent = '✨ Running in Bug Workspace!';
   out.style.color = '#4ade80';
@@ -140,10 +140,10 @@ if __name__ == "__main__":
   static void _seedWeb(String clean, String title) {
     final r = '/web/$clean';
     _webFiles['$r/index.html'] = _html(title);
-    _webFiles['$r/style.css']  = _css;
-    _webFiles['$r/script.js']  = _js;
-    _webFiles['$r/main.py']    = _py;
-    _webFiles['$r/README.md']  = _readme(title);
+    _webFiles['$r/style.css'] = _css;
+    _webFiles['$r/script.js'] = _js;
+    _webFiles['$r/main.py'] = _py;
+    _webFiles['$r/README.md'] = _readme(title);
   }
 
   static Future<void> _seedNative(Directory root, String title) async {
@@ -164,33 +164,44 @@ if __name__ == "__main__":
   }
 
   static List<FileNode> _webTree(String root) {
-    final Map<String, List<FileNode>> folders = {};
-    final List<FileNode> rootFiles = [];
-    final Set<String> seen = {};
+    final relativePaths = _webFiles.keys
+        .where((path) => path.startsWith('$root/'))
+        .map((path) => path.substring(root.length + 1).split('/'))
+        .where((parts) =>
+            parts.isNotEmpty && parts.every((part) => part.isNotEmpty))
+        .toList();
 
-    for (final p in _webFiles.keys) {
-      if (!p.startsWith('$root/')) continue;
-      final rel   = p.substring(root.length + 1);
-      final parts = rel.split('/');
+    return _buildWebTreeLevel(root, relativePaths);
+  }
 
+  static List<FileNode> _buildWebTreeLevel(
+    String directoryPath,
+    List<List<String>> relativePaths,
+  ) {
+    final folders = <String, List<List<String>>>{};
+    final files = <String>{};
+
+    for (final parts in relativePaths) {
       if (parts.length == 1) {
-        if (!seen.contains(p)) { seen.add(p); rootFiles.add(FileNode(name: parts[0], path: p)); }
-      } else {
-        final folder = parts[0];
-        folders.putIfAbsent(folder, () => []);
-        final fp = '$root/$folder/${parts.last}';
-        if (!seen.contains(fp)) {
-          seen.add(fp);
-          folders[folder]!.add(FileNode(name: parts.last, path: fp));
-        }
+        files.add(parts.first);
+        continue;
       }
+      folders.putIfAbsent(parts.first, () => []).add(parts.sublist(1));
     }
 
     final result = <FileNode>[
-      ...folders.entries.map((e) => FileNode(
-        name: e.key, path: '$root/${e.key}', isFolder: true, children: e.value,
-      )),
-      ...rootFiles,
+      ...folders.entries.map((entry) {
+        final folderPath = '$directoryPath/${entry.key}';
+        return FileNode(
+          name: entry.key,
+          path: folderPath,
+          isFolder: true,
+          children: _buildWebTreeLevel(folderPath, entry.value),
+        );
+      }),
+      ...files.map(
+        (name) => FileNode(name: name, path: '$directoryPath/$name'),
+      ),
     ];
     result.sort((a, b) {
       if (a.isFolder != b.isFolder) return a.isFolder ? -1 : 1;
@@ -202,23 +213,32 @@ if __name__ == "__main__":
   static Future<List<FileNode>> _nativeTree(Directory dir) async {
     if (!await dir.exists()) return [];
     try {
-      final list = await dir.list(recursive: false, followLinks: false).toList();
+      final list =
+          await dir.list(recursive: false, followLinks: false).toList();
       final folders = <FileNode>[];
-      final files   = <FileNode>[];
+      final files = <FileNode>[];
       for (final e in list) {
-        final name = e.path.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).last;
+        final name =
+            e.path.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).last;
         if (name.startsWith('.')) continue;
         if (e is Directory) {
-          folders.add(FileNode(name: name, path: e.path, isFolder: true,
+          folders.add(FileNode(
+              name: name,
+              path: e.path,
+              isFolder: true,
               children: await _nativeTree(Directory(e.path))));
         } else if (e is File) {
           files.add(FileNode(name: name, path: e.path));
         }
       }
-      folders.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      files.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      folders
+          .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      files
+          .sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       return [...folders, ...files];
-    } catch (ex) { return []; }
+    } catch (ex) {
+      return [];
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -238,7 +258,9 @@ if __name__ == "__main__":
           return '';
         }
       }
-    } catch (_) { return ''; }
+    } catch (_) {
+      return '';
+    }
   }
 
   static Future<Uint8List?> readBytes(String path) async {
@@ -263,50 +285,176 @@ if __name__ == "__main__":
   }
 
   static Future<bool> writeFile(String path, String content) async {
-    if (kIsWeb) { _webFiles[path] = content; return true; }
+    if (kIsWeb) {
+      _webFiles[path] = content;
+      return true;
+    }
     try {
       final f = File(path);
       if (!await f.exists()) await f.create(recursive: true);
       await f.writeAsString(content, encoding: utf8, flush: true);
       return true;
-    } catch (_) { return false; }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns an edited, text-only snapshot suitable for a local source ZIP.
+  /// The cap prevents browser/mobile exports from exhausting device memory.
+  static Future<Map<String, String>> snapshotTextFiles(
+    String rootPath, {
+    int maxTotalBytes = 32 * 1024 * 1024,
+  }) async {
+    final normalizedRoot =
+        rootPath.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    final result = <String, String>{};
+    var totalBytes = 0;
+
+    if (kIsWeb) {
+      for (final entry in _webFiles.entries) {
+        if (!entry.key.startsWith('$normalizedRoot/')) continue;
+        final bytes = utf8.encode(entry.value).length;
+        if (totalBytes + bytes > maxTotalBytes) {
+          throw StateError(
+              'Edited workspace is larger than 32 MB. Download the original repository archive instead.');
+        }
+        result[entry.key.substring(normalizedRoot.length + 1)] = entry.value;
+        totalBytes += bytes;
+      }
+      return result;
+    }
+
+    final root = Directory(rootPath);
+    if (!await root.exists()) return result;
+    await for (final entity in root.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final bytes = await entity.readAsBytes();
+      if (bytes.length > 5 * 1024 * 1024 || bytes.contains(0)) continue;
+      try {
+        final content = utf8.decode(bytes, allowMalformed: false);
+        if (totalBytes + bytes.length > maxTotalBytes) {
+          throw StateError(
+              'Edited workspace is larger than 32 MB. Download the original repository archive instead.');
+        }
+        final path = entity.path.replaceAll('\\', '/');
+        result[path.substring(normalizedRoot.length + 1)] = content;
+        totalBytes += bytes.length;
+      } on FormatException {
+        continue;
+      }
+    }
+    return result;
+  }
+
+  /// Replaces one workspace root with text files fetched from GitHub. This is
+  /// deliberately local/in-memory; no source content is written to Supabase.
+  static Future<void> replaceWithRepositoryFiles(
+    String rootPath,
+    Map<String, String> files,
+  ) async {
+    final normalizedRoot =
+        rootPath.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    if (kIsWeb) {
+      _webFiles.removeWhere((path, _) =>
+          path == normalizedRoot || path.startsWith('$normalizedRoot/'));
+      for (final entry in files.entries) {
+        final relative = _safeRelativePath(entry.key);
+        _webFiles['$normalizedRoot/$relative'] = entry.value;
+      }
+      return;
+    }
+
+    final root = Directory(rootPath);
+    if (await root.exists()) {
+      final normalizedNativeRoot =
+          rootPath.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+      final rootParts = normalizedNativeRoot
+          .split('/')
+          .where((part) => part.isNotEmpty)
+          .toList();
+      if (!rootParts.contains('MyBugWorkspaces') ||
+          rootParts.last == 'MyBugWorkspaces') {
+        throw StateError('Unsafe workspace path.');
+      }
+      await root.delete(recursive: true);
+    }
+    await root.create(recursive: true);
+    for (final entry in files.entries) {
+      final relative = _safeRelativePath(entry.key);
+      final target = File('${root.path}/$relative');
+      final targetPath = target.path.replaceAll('\\', '/');
+      final parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'));
+      await Directory(parentPath).create(recursive: true);
+      await target.writeAsString(entry.value, encoding: utf8, flush: true);
+    }
+  }
+
+  static String _safeRelativePath(String path) {
+    final normalized =
+        path.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '');
+    final parts = normalized.split('/');
+    if (normalized.isEmpty ||
+        parts.any((part) => part.isEmpty || part == '.' || part == '..')) {
+      throw FormatException('Unsafe repository path: $path');
+    }
+    return normalized;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   //  Create
   // ─────────────────────────────────────────────────────────────────────────
-  static Future<bool> createFile(String parent, String name, [String init = '']) async {
+  static Future<bool> createFile(String parent, String name,
+      [String init = '']) async {
     final full = '$parent/$name';
-    if (kIsWeb) { _webFiles[full] = init; return true; }
+    if (kIsWeb) {
+      _webFiles[full] = init;
+      return true;
+    }
     try {
       final f = File(full);
       if (!await f.exists()) await f.create(recursive: true);
       if (init.isNotEmpty) await f.writeAsString(init, encoding: utf8);
       return true;
-    } catch (_) { return false; }
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<bool> createFolder(String parent, String name) async {
-    if (kIsWeb) { _webFiles['$parent/$name/.keep'] = ''; return true; }
+    if (kIsWeb) {
+      _webFiles['$parent/$name/.keep'] = '';
+      return true;
+    }
     try {
       final d = Directory('$parent/$name');
       if (!await d.exists()) await d.create(recursive: true);
       return true;
-    } catch (_) { return false; }
+    } catch (_) {
+      return false;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   //  Delete
   // ─────────────────────────────────────────────────────────────────────────
   static Future<bool> deleteNode(String path, bool isFolder) async {
-    if (kIsWeb) { _webFiles.removeWhere((k, _) => k.startsWith(path)); return true; }
+    if (kIsWeb) {
+      _webFiles.removeWhere((k, _) => k.startsWith(path));
+      return true;
+    }
     try {
       if (isFolder) {
         final d = Directory(path);
-        if (await d.exists()) { await d.delete(recursive: true); return true; }
+        if (await d.exists()) {
+          await d.delete(recursive: true);
+          return true;
+        }
       } else {
         final f = File(path);
-        if (await f.exists()) { await f.delete(); return true; }
+        if (await f.exists()) {
+          await f.delete();
+          return true;
+        }
       }
     } catch (_) {}
     return false;
@@ -316,15 +464,16 @@ if __name__ == "__main__":
   //  Rename
   // ─────────────────────────────────────────────────────────────────────────
   static Future<String?> renameNode(String oldPath, String newName) async {
-    final sep     = oldPath.contains('\\') ? '\\' : '/';
-    final parts   = oldPath.split(sep);
-    parts.last    = newName;
+    final sep = oldPath.contains('\\') ? '\\' : '/';
+    final parts = oldPath.split(sep);
+    parts.last = newName;
     final newPath = parts.join(sep);
 
     if (kIsWeb) {
       for (final key in Map.of(_webFiles).keys) {
         if (key.startsWith(oldPath)) {
-          _webFiles[key.replaceFirst(oldPath, newPath)] = _webFiles.remove(key)!;
+          _webFiles[key.replaceFirst(oldPath, newPath)] =
+              _webFiles.remove(key)!;
         }
       }
       return newPath;
@@ -336,7 +485,9 @@ if __name__ == "__main__":
         await File(oldPath).rename(newPath);
       }
       return newPath;
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -382,6 +533,39 @@ if (\$f.ShowDialog(\$top) -eq [System.Windows.Forms.DialogResult]::OK) {
     return null;
   }
 
+  static Future<String?> pickFileNative([String? initialPath]) async {
+    if (kIsWeb || !Platform.isWindows) return null;
+    try {
+      final init = (initialPath != null && initialPath.isNotEmpty)
+          ? initialPath.replaceAll("'", "''")
+          : '';
+      final script = '''
+Add-Type -AssemblyName System.Windows.Forms;
+\$f = New-Object System.Windows.Forms.OpenFileDialog;
+\$f.Title = 'Select a code file to open in Bug Workspace';
+\$f.Filter = 'All files (*.*)|*.*';
+\$f.Multiselect = \$false;
+if ('$init' -ne '' -and (Test-Path '$init')) { \$f.InitialDirectory = '$init' }
+\$top = New-Object System.Windows.Forms.Form;
+\$top.TopMost = \$true;
+if (\$f.ShowDialog(\$top) -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::Out.Write(\$f.FileName)
+}
+''';
+      final response = await Process.run('powershell', [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        script,
+      ]);
+      if (response.exitCode != 0) return null;
+      final path = response.stdout.toString().trim();
+      if (path.isNotEmpty && await File(path).exists()) return path;
+    } catch (_) {}
+    return null;
+  }
+
   static Future<List<String>> listDirectories(String currentPath) async {
     if (kIsWeb) {
       return [
@@ -399,7 +583,9 @@ if (\$f.ShowDialog(\$top) -eq [System.Windows.Forms.DialogResult]::OK) {
         if (entity is Directory) {
           final sep = entity.path.contains('\\') ? '\\' : '/';
           final name = entity.path.split(sep).last;
-          if (!name.startsWith('.') && name != 'node_modules' && name != 'build') {
+          if (!name.startsWith('.') &&
+              name != 'node_modules' &&
+              name != 'build') {
             list.add(entity.path);
           }
         }

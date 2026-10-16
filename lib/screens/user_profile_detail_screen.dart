@@ -19,16 +19,16 @@ import '../widgets/expandable_text.dart';
 import '../widgets/morphing_capsule.dart';
 import '../services/supabase_data_service.dart';
 import '../services/local_posts_cache.dart';
-
+import '../services/chat_service.dart';
 
 // ── Liquid Glass Color Tokens (Strict Glass Palette: Obsidian, White, Cyan) ──
-const _kBgDark        = Color(0xFF09090B);
-const _kGlassSurface   = Color(0x14FFFFFF); // rgba(255,255,255,0.08)
-const _kGlassElevated  = Color(0x1FFFFFFF); // rgba(255,255,255,0.12)
-const _kGlassBorder    = Color(0x26FFFFFF); // rgba(255,255,255,0.15)
+const _kBgDark = Color(0xFF09090B);
+const _kGlassSurface = Color(0x14FFFFFF); // rgba(255,255,255,0.08)
+const _kGlassElevated = Color(0x1FFFFFFF); // rgba(255,255,255,0.12)
+const _kGlassBorder = Color(0x26FFFFFF); // rgba(255,255,255,0.15)
 const _kGlassHighlight = Color(0x40FFFFFF); // rgba(255,255,255,0.25)
-const _kAccentCyan     = Color(0xFF54C5F8); // Pure Ice-Cyan highlight
-const _kAccentPink     = Color(0xFFFF4864);
+const _kAccentCyan = Color(0xFF54C5F8); // Pure Ice-Cyan highlight
+const _kAccentPink = Color(0xFFFF4864);
 
 class UserProfileDetailScreen extends StatefulWidget {
   final UserProfile user;
@@ -43,7 +43,8 @@ class UserProfileDetailScreen extends StatefulWidget {
   });
 
   @override
-  State<UserProfileDetailScreen> createState() => _UserProfileDetailScreenState();
+  State<UserProfileDetailScreen> createState() =>
+      _UserProfileDetailScreenState();
 }
 
 class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
@@ -74,7 +75,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
           for (final cp in cached) {
             localUserPosts.add(UserPostItem(
               id: cp.id,
-              content: cp.captionBody.isNotEmpty ? cp.captionBody : cp.captionTitle,
+              content:
+                  cp.captionBody.isNotEmpty ? cp.captionBody : cp.captionTitle,
               codeSnippet: cp.imageUrl.isNotEmpty ? null : cp.captionBody,
               likesCount: cp.likesCount,
               commentsCount: cp.commentsCount,
@@ -108,13 +110,18 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
       final List<UserMediaItem> mediaItems = [];
       for (final p in posts) {
         final snippet = p['code_snippet']?.toString();
-        final isImage = snippet != null && (snippet.startsWith('http') || snippet.startsWith('data:image') || snippet.startsWith('blob:'));
+        final isImage = snippet != null &&
+            (snippet.startsWith('http') ||
+                snippet.startsWith('data:image') ||
+                snippet.startsWith('blob:'));
         final desc = p['description']?.toString() ?? '';
         final title = p['title']?.toString() ?? 'Post';
         userPosts.add(UserPostItem(
           id: p['id'].toString(),
           content: desc.isNotEmpty ? desc : title,
-          codeSnippet: (!isImage && snippet != null && snippet.isNotEmpty) ? snippet : null,
+          codeSnippet: (!isImage && snippet != null && snippet.isNotEmpty)
+              ? snippet
+              : null,
           language: p['code_language']?.toString(),
           likesCount: (p['likes_count'] as num?)?.toInt() ?? 0,
           commentsCount: (p['comments_count'] as num?)?.toInt() ?? 0,
@@ -137,7 +144,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
       if (mounted) {
         setState(() {
           final Set<String> remoteIds = userPosts.map((up) => up.id).toSet();
-          final localUnsynced = widget.user.posts.where((lp) => !remoteIds.contains(lp.id)).toList();
+          final localUnsynced = widget.user.posts
+              .where((lp) => !remoteIds.contains(lp.id))
+              .toList();
           widget.user.posts = [...localUnsynced, ...userPosts];
           widget.user.mediaItems = mediaItems;
           widget.user.postsCount = widget.user.posts.length;
@@ -183,44 +192,53 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
     );
   }
 
-  void _openDirectChatWithUser() {
+  Future<void> _openDirectChatWithUser() async {
     final store = ChatStateStore.instance;
-    ChatConversation? conv;
     try {
-      conv = store.conversations.firstWhere(
-        (c) =>
-            c.name.toLowerCase() == widget.user.name.toLowerCase() ||
-            c.name.toLowerCase() == widget.user.handle.toLowerCase() ||
-            c.id == widget.user.id,
-      );
-    } catch (_) {
-      conv = ChatConversation(
-        id: widget.user.id,
-        name: widget.user.handle.isNotEmpty ? widget.user.handle : widget.user.name,
-        role: widget.user.headline.isNotEmpty ? widget.user.headline : widget.user.roleBadge,
-        avatarUrl: widget.user.avatarUrl,
-        isOnline: widget.user.isOnline,
-        lastMessage: 'Tap to send message',
-        time: 'Now',
-        unreadCount: 0,
-        messages: [],
-      );
-      store.conversations.insert(0, conv);
-    }
+      final conversationId =
+          await ChatService.getOrCreateDirectConversation(widget.user.id);
+      if (!mounted) return;
+      ChatConversation conv;
+      try {
+        conv =
+            store.conversations.firstWhere((item) => item.id == conversationId);
+      } catch (_) {
+        conv = ChatConversation(
+          id: conversationId,
+          name: widget.user.handle.isNotEmpty
+              ? widget.user.handle
+              : widget.user.name,
+          role: widget.user.headline.isNotEmpty
+              ? widget.user.headline
+              : widget.user.roleBadge,
+          avatarUrl: widget.user.avatarUrl,
+          isOnline: widget.user.isOnline,
+          lastMessage: 'Tap to send message',
+          time: 'Now',
+          unreadCount: 0,
+          messages: [],
+        );
+        store.conversations.insert(0, conv);
+      }
 
-    store.selectedConversationId = conv.id;
+      store.selectedConversationId = conv.id;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (ctx) => IndividualChatScreen(
-          conversation: conv!,
-          defaultWallpaper: store.defaultWallpaper,
-          allConversations: store.conversations,
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (ctx) => IndividualChatScreen(
+            conversation: conv,
+            defaultWallpaper: store.defaultWallpaper,
+            allConversations: store.conversations,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open chat: $error')),
+      );
+    }
   }
-
 
   void _handleDownloadMedia(UserMediaItem item) async {
     if (_downloadingItemIds.contains(item.id)) return;
@@ -292,7 +310,10 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               const SizedBox(height: 16),
               const Text(
                 'Change Profile Picture',
-                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
               const SizedBox(height: 12),
@@ -307,7 +328,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     });
                     if (widget.isSelf) {
                       try {
-                        final auth = Provider.of<AuthProvider>(context, listen: false);
+                        final auth =
+                            Provider.of<AuthProvider>(context, listen: false);
                         await auth.updateProfile(avatarUrl: chosenUrl);
                       } catch (e) {
                         debugPrint('Error updating avatar from device: $e');
@@ -315,7 +337,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     }
                     if (mounted) {
                       Navigator.pop(ctx);
-                      _showGlassToast('Profile photo updated!', icon: LucideIcons.check, isSuccess: true);
+                      _showGlassToast('Profile photo updated!',
+                          icon: LucideIcons.check, isSuccess: true);
                     }
                   }
                 },
@@ -330,11 +353,15 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(LucideIcons.imagePlus, color: _kAccentCyan, size: 18),
+                      Icon(LucideIcons.imagePlus,
+                          color: _kAccentCyan, size: 18),
                       SizedBox(width: 8),
                       Text(
                         'Upload from Device / Gallery',
-                        style: TextStyle(color: _kAccentCyan, fontWeight: FontWeight.bold, fontSize: 13),
+                        style: TextStyle(
+                            color: _kAccentCyan,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13),
                       ),
                     ],
                   ),
@@ -362,7 +389,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         });
                         if (widget.isSelf) {
                           try {
-                            final auth = Provider.of<AuthProvider>(context, listen: false);
+                            final auth = Provider.of<AuthProvider>(context,
+                                listen: false);
                             await auth.updateProfile(avatarUrl: chosenAvatar);
                           } catch (e) {
                             debugPrint('Error updating avatar: $e');
@@ -370,7 +398,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         }
                         if (mounted) {
                           Navigator.pop(ctx);
-                          _showGlassToast('Profile photo saved to database!', icon: LucideIcons.check, isSuccess: true);
+                          _showGlassToast('Profile photo saved to database!',
+                              icon: LucideIcons.check, isSuccess: true);
                         }
                       },
                       child: Container(
@@ -401,7 +430,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   hintStyle: const TextStyle(color: Colors.white54),
                   filled: true,
                   fillColor: _kGlassElevated,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: _kGlassBorder),
@@ -422,7 +452,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+                    child: const Text('Cancel',
+                        style: TextStyle(color: Colors.white70)),
                   ),
                   const SizedBox(width: 8),
                   SpringButton(
@@ -434,7 +465,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         });
                         if (widget.isSelf) {
                           try {
-                            final auth = Provider.of<AuthProvider>(context, listen: false);
+                            final auth = Provider.of<AuthProvider>(context,
+                                listen: false);
                             await auth.updateProfile(avatarUrl: customUrl);
                           } catch (e) {
                             debugPrint('Error updating custom avatar: $e');
@@ -442,19 +474,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         }
                         if (mounted) {
                           Navigator.pop(ctx);
-                          _showGlassToast('Profile photo saved to database!', icon: LucideIcons.check, isSuccess: true);
+                          _showGlassToast('Profile photo saved to database!',
+                              icon: LucideIcons.check, isSuccess: true);
                         }
                       }
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 18, vertical: 10),
                       decoration: BoxDecoration(
                         color: _kAccentCyan,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Text(
                         'Save URL',
-                        style: TextStyle(color: Colors.black, fontWeight: FontWeight.w700, fontSize: 13),
+                        style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13),
                       ),
                     ),
                   ),
@@ -472,7 +509,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
     final headlineCtrl = TextEditingController(text: widget.user.headline);
     final bioCtrl = TextEditingController(text: widget.user.bio);
     final deptCtrl = TextEditingController(text: widget.user.department);
-    final skillsCtrl = TextEditingController(text: widget.user.skills.join(', '));
+    final skillsCtrl =
+        TextEditingController(text: widget.user.skills.join(', '));
 
     showModalBottomSheet(
       context: context,
@@ -491,7 +529,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
           decoration: BoxDecoration(
             color: const Color(0xFF09090B).withOpacity(0.82),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.2),
+            border:
+                Border.all(color: Colors.white.withOpacity(0.18), width: 1.2),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -500,7 +539,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 child: Container(
                   width: 40,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 14),
@@ -509,7 +550,10 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 children: [
                   const Text(
                     'Edit Profile Information',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold),
                   ),
                   SpringButton(
                     onTap: () async {
@@ -535,7 +579,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
 
                       if (widget.isSelf) {
                         try {
-                          final auth = Provider.of<AuthProvider>(context, listen: false);
+                          final auth =
+                              Provider.of<AuthProvider>(context, listen: false);
                           await auth.updateProfile(
                             name: newName.isNotEmpty ? newName : null,
                             headline: newHeadline,
@@ -550,16 +595,22 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
 
                       if (mounted) {
                         Navigator.pop(ctx);
-                        _showGlassToast('Profile saved to database!', icon: LucideIcons.check, isSuccess: true);
+                        _showGlassToast('Profile saved to database!',
+                            icon: LucideIcons.check, isSuccess: true);
                       }
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
                         color: _kAccentCyan,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w700, fontSize: 13)),
+                      child: const Text('Save',
+                          style: TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13)),
                     ),
                   ),
                 ],
@@ -571,13 +622,17 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   children: [
                     _buildEditField('Display Name', nameCtrl, LucideIcons.user),
                     const SizedBox(height: 14),
-                    _buildEditField('Headline', headlineCtrl, LucideIcons.sparkles),
+                    _buildEditField(
+                        'Headline', headlineCtrl, LucideIcons.sparkles),
                     const SizedBox(height: 14),
-                    _buildEditField('Department / Year', deptCtrl, LucideIcons.briefcase),
+                    _buildEditField(
+                        'Department / Year', deptCtrl, LucideIcons.briefcase),
                     const SizedBox(height: 14),
-                    _buildEditField('Bio', bioCtrl, LucideIcons.fileText, maxLines: 3),
+                    _buildEditField('Bio', bioCtrl, LucideIcons.fileText,
+                        maxLines: 3),
                     const SizedBox(height: 14),
-                    _buildEditField('Skills (comma separated)', skillsCtrl, LucideIcons.code),
+                    _buildEditField('Skills (comma separated)', skillsCtrl,
+                        LucideIcons.code),
                     const SizedBox(height: 24),
                   ],
                 ),
@@ -617,8 +672,10 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               ),
               decoration: BoxDecoration(
                 color: const Color(0xFF09090B).withOpacity(0.82),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.2),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.18), width: 1.2),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -627,7 +684,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     child: Container(
                       width: 40,
                       height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -636,7 +695,10 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     children: [
                       const Text(
                         'Create & Share',
-                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold),
                       ),
                       SpringButton(
                         onTap: () {
@@ -648,8 +710,13 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                             final newPost = UserPostItem(
                               id: 'post-${DateTime.now().millisecondsSinceEpoch}',
                               content: postContentCtrl.text.trim(),
-                              codeSnippet: codeSnippetCtrl.text.trim().isNotEmpty ? codeSnippetCtrl.text.trim() : null,
-                              language: codeLangCtrl.text.trim().isNotEmpty ? codeLangCtrl.text.trim() : null,
+                              codeSnippet:
+                                  codeSnippetCtrl.text.trim().isNotEmpty
+                                      ? codeSnippetCtrl.text.trim()
+                                      : null,
+                              language: codeLangCtrl.text.trim().isNotEmpty
+                                  ? codeLangCtrl.text.trim()
+                                  : null,
                               likesCount: 0,
                               commentsCount: 0,
                               timestamp: 'Just now',
@@ -660,15 +727,22 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                             });
                             SupabaseDataService.createPost(
                               description: postContentCtrl.text.trim(),
-                              codeSnippet: codeSnippetCtrl.text.trim().isNotEmpty ? codeSnippetCtrl.text.trim() : null,
-                              codeLanguage: codeLangCtrl.text.trim().isNotEmpty ? codeLangCtrl.text.trim() : 'dart',
+                              codeSnippet:
+                                  codeSnippetCtrl.text.trim().isNotEmpty
+                                      ? codeSnippetCtrl.text.trim()
+                                      : null,
+                              codeLanguage: codeLangCtrl.text.trim().isNotEmpty
+                                  ? codeLangCtrl.text.trim()
+                                  : 'dart',
                               userId: widget.user.id,
-                              authorUsername: widget.user.handle.replaceAll('@', ''),
+                              authorUsername:
+                                  widget.user.handle.replaceAll('@', ''),
                               authorFullName: widget.user.name,
                               authorAvatar: widget.user.avatarUrl,
                             );
                             Navigator.pop(ctx);
-                            _showGlassToast('Post published to profile!', icon: LucideIcons.checkCircle, isSuccess: true);
+                            _showGlassToast('Post published to profile!',
+                                icon: LucideIcons.checkCircle, isSuccess: true);
                           } else {
                             if (mediaTitleCtrl.text.trim().isEmpty) {
                               _showGlassToast('Please enter a title');
@@ -698,21 +772,28 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                               title: mediaTitleCtrl.text.trim(),
                               codeSnippet: url,
                               userId: widget.user.id,
-                              authorUsername: widget.user.handle.replaceAll('@', ''),
+                              authorUsername:
+                                  widget.user.handle.replaceAll('@', ''),
                               authorFullName: widget.user.name,
                               authorAvatar: widget.user.avatarUrl,
                             );
                             Navigator.pop(ctx);
-                            _showGlassToast('New media published!', icon: LucideIcons.checkCircle, isSuccess: true);
+                            _showGlassToast('New media published!',
+                                icon: LucideIcons.checkCircle, isSuccess: true);
                           }
                         },
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 18, vertical: 8),
                           decoration: BoxDecoration(
                             color: _kAccentCyan,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Text('Post', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w700, fontSize: 13)),
+                          child: const Text('Post',
+                              style: TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13)),
                         ),
                       ),
                     ],
@@ -733,20 +814,31 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                             child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               decoration: BoxDecoration(
-                                color: activeType == 0 ? _kAccentCyan.withOpacity(0.2) : Colors.transparent,
+                                color: activeType == 0
+                                    ? _kAccentCyan.withOpacity(0.2)
+                                    : Colors.transparent,
                                 borderRadius: BorderRadius.circular(8),
-                                border: activeType == 0 ? Border.all(color: _kAccentCyan.withOpacity(0.5)) : null,
+                                border: activeType == 0
+                                    ? Border.all(
+                                        color: _kAccentCyan.withOpacity(0.5))
+                                    : null,
                               ),
                               alignment: Alignment.center,
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(LucideIcons.fileText, size: 14, color: activeType == 0 ? _kAccentCyan : Colors.white60),
+                                  Icon(LucideIcons.fileText,
+                                      size: 14,
+                                      color: activeType == 0
+                                          ? _kAccentCyan
+                                          : Colors.white60),
                                   const SizedBox(width: 6),
                                   Text(
                                     'Post / Code',
                                     style: TextStyle(
-                                      color: activeType == 0 ? _kAccentCyan : Colors.white60,
+                                      color: activeType == 0
+                                          ? _kAccentCyan
+                                          : Colors.white60,
                                       fontWeight: FontWeight.w600,
                                       fontSize: 12,
                                     ),
@@ -762,20 +854,31 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                             child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               decoration: BoxDecoration(
-                                color: activeType == 1 ? _kAccentCyan.withOpacity(0.2) : Colors.transparent,
+                                color: activeType == 1
+                                    ? _kAccentCyan.withOpacity(0.2)
+                                    : Colors.transparent,
                                 borderRadius: BorderRadius.circular(8),
-                                border: activeType == 1 ? Border.all(color: _kAccentCyan.withOpacity(0.5)) : null,
+                                border: activeType == 1
+                                    ? Border.all(
+                                        color: _kAccentCyan.withOpacity(0.5))
+                                    : null,
                               ),
                               alignment: Alignment.center,
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(LucideIcons.image, size: 14, color: activeType == 1 ? _kAccentCyan : Colors.white60),
+                                  Icon(LucideIcons.image,
+                                      size: 14,
+                                      color: activeType == 1
+                                          ? _kAccentCyan
+                                          : Colors.white60),
                                   const SizedBox(width: 6),
                                   Text(
                                     'Media',
                                     style: TextStyle(
-                                      color: activeType == 1 ? _kAccentCyan : Colors.white60,
+                                      color: activeType == 1
+                                          ? _kAccentCyan
+                                          : Colors.white60,
                                       fontWeight: FontWeight.w600,
                                       fontSize: 12,
                                     ),
@@ -794,40 +897,59 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         ? ListView(
                             physics: const BouncingScrollPhysics(),
                             children: [
-                              _buildEditField('Post Content', postContentCtrl, LucideIcons.messageSquare, maxLines: 4),
+                              _buildEditField('Post Content', postContentCtrl,
+                                  LucideIcons.messageSquare,
+                                  maxLines: 4),
                               const SizedBox(height: 14),
-                              _buildEditField('Code Snippet (Optional)', codeSnippetCtrl, LucideIcons.code, maxLines: 5),
+                              _buildEditField('Code Snippet (Optional)',
+                                  codeSnippetCtrl, LucideIcons.code,
+                                  maxLines: 5),
                               const SizedBox(height: 14),
-                              _buildEditField('Language', codeLangCtrl, LucideIcons.terminal),
+                              _buildEditField('Language', codeLangCtrl,
+                                  LucideIcons.terminal),
                             ],
                           )
                         : ListView(
                             physics: const BouncingScrollPhysics(),
                             children: [
-                              _buildEditField('Media Title', mediaTitleCtrl, LucideIcons.type),
+                              _buildEditField('Media Title', mediaTitleCtrl,
+                                  LucideIcons.type),
                               const SizedBox(height: 14),
-                              _buildEditField('Image / Video URL', mediaUrlCtrl, LucideIcons.link2),
+                              _buildEditField('Image / Video URL', mediaUrlCtrl,
+                                  LucideIcons.link2),
                               const SizedBox(height: 14),
                               Row(
                                 children: [
-                                  const Text('Media Type: ', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                                  const Text('Media Type: ',
+                                      style: TextStyle(
+                                          color: Colors.white70, fontSize: 13)),
                                   const SizedBox(width: 10),
                                   ChoiceChip(
                                     label: const Text('Image'),
                                     selected: mediaType == 'image',
-                                    onSelected: (s) => setModalState(() => mediaType = 'image'),
-                                    selectedColor: _kAccentCyan.withOpacity(0.3),
+                                    onSelected: (s) => setModalState(
+                                        () => mediaType = 'image'),
+                                    selectedColor:
+                                        _kAccentCyan.withOpacity(0.3),
                                     backgroundColor: _kGlassElevated,
-                                    labelStyle: TextStyle(color: mediaType == 'image' ? _kAccentCyan : Colors.white60),
+                                    labelStyle: TextStyle(
+                                        color: mediaType == 'image'
+                                            ? _kAccentCyan
+                                            : Colors.white60),
                                   ),
                                   const SizedBox(width: 8),
                                   ChoiceChip(
                                     label: const Text('Video'),
                                     selected: mediaType == 'video',
-                                    onSelected: (s) => setModalState(() => mediaType = 'video'),
-                                    selectedColor: _kAccentCyan.withOpacity(0.3),
+                                    onSelected: (s) => setModalState(
+                                        () => mediaType = 'video'),
+                                    selectedColor:
+                                        _kAccentCyan.withOpacity(0.3),
                                     backgroundColor: _kGlassElevated,
-                                    labelStyle: TextStyle(color: mediaType == 'video' ? _kAccentCyan : Colors.white60),
+                                    labelStyle: TextStyle(
+                                        color: mediaType == 'video'
+                                            ? _kAccentCyan
+                                            : Colors.white60),
                                   ),
                                 ],
                               ),
@@ -852,7 +974,14 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
     double zoomLevel = 1.0;
     bool isCircleCrop = true;
 
-    final filterNames = ['Natural', 'Cyber Ice', 'Emerald', 'Sunset', 'Monokai', 'Obsidian B&W'];
+    final filterNames = [
+      'Natural',
+      'Cyber Ice',
+      'Emerald',
+      'Sunset',
+      'Monokai',
+      'Obsidian B&W'
+    ];
     final filterTints = [
       Colors.transparent,
       const Color(0x3354C5F8),
@@ -875,7 +1004,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               decoration: BoxDecoration(
                 color: const Color(0xFF09090B).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(28)),
                 border: Border.all(color: Colors.white.withOpacity(0.18)),
               ),
               child: Column(
@@ -884,7 +1014,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     child: Container(
                       width: 40,
                       height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -897,13 +1029,17 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                           SizedBox(width: 8),
                           Text(
                             'Edit Avatar & Colors',
-                            style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                        icon: const Icon(LucideIcons.x,
+                            color: Colors.white70, size: 20),
                       ),
                     ],
                   ),
@@ -916,8 +1052,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         width: 220,
                         height: 220,
                         decoration: BoxDecoration(
-                          shape: isCircleCrop ? BoxShape.circle : BoxShape.rectangle,
-                          borderRadius: isCircleCrop ? null : BorderRadius.circular(24),
+                          shape: isCircleCrop
+                              ? BoxShape.circle
+                              : BoxShape.rectangle,
+                          borderRadius:
+                              isCircleCrop ? null : BorderRadius.circular(24),
                           border: Border.all(color: _kAccentCyan, width: 2.5),
                           boxShadow: [
                             BoxShadow(
@@ -937,7 +1076,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                 rawImageUrl,
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => const Center(
-                                  child: Icon(LucideIcons.image, color: Colors.white38, size: 40),
+                                  child: Icon(LucideIcons.image,
+                                      color: Colors.white38, size: 40),
                                 ),
                               ),
                             ),
@@ -960,32 +1100,41 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         label: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(LucideIcons.circle, size: 13, color: Colors.white),
+                            Icon(LucideIcons.circle,
+                                size: 13, color: Colors.white),
                             SizedBox(width: 6),
                             Text('1:1 Circle'),
                           ],
                         ),
                         selected: isCircleCrop,
-                        onSelected: (s) => setStudioState(() => isCircleCrop = true),
+                        onSelected: (s) =>
+                            setStudioState(() => isCircleCrop = true),
                         selectedColor: _kAccentCyan.withOpacity(0.3),
                         backgroundColor: _kGlassElevated,
-                        labelStyle: TextStyle(color: isCircleCrop ? _kAccentCyan : Colors.white60, fontSize: 12),
+                        labelStyle: TextStyle(
+                            color: isCircleCrop ? _kAccentCyan : Colors.white60,
+                            fontSize: 12),
                       ),
                       const SizedBox(width: 10),
                       ChoiceChip(
                         label: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(LucideIcons.square, size: 13, color: Colors.white),
+                            Icon(LucideIcons.square,
+                                size: 13, color: Colors.white),
                             SizedBox(width: 6),
                             Text('1:1 Square'),
                           ],
                         ),
                         selected: !isCircleCrop,
-                        onSelected: (s) => setStudioState(() => isCircleCrop = false),
+                        onSelected: (s) =>
+                            setStudioState(() => isCircleCrop = false),
                         selectedColor: _kAccentCyan.withOpacity(0.3),
                         backgroundColor: _kGlassElevated,
-                        labelStyle: TextStyle(color: !isCircleCrop ? _kAccentCyan : Colors.white60, fontSize: 12),
+                        labelStyle: TextStyle(
+                            color:
+                                !isCircleCrop ? _kAccentCyan : Colors.white60,
+                            fontSize: 12),
                       ),
                     ],
                   ),
@@ -994,7 +1143,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   // Zoom Slider
                   Row(
                     children: [
-                      const Icon(LucideIcons.zoomIn, color: Colors.white60, size: 16),
+                      const Icon(LucideIcons.zoomIn,
+                          color: Colors.white60, size: 16),
                       const SizedBox(width: 10),
                       Expanded(
                         child: SliderTheme(
@@ -1006,11 +1156,14 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                             value: zoomLevel,
                             min: 1.0,
                             max: 2.5,
-                            onChanged: (val) => setStudioState(() => zoomLevel = val),
+                            onChanged: (val) =>
+                                setStudioState(() => zoomLevel = val),
                           ),
                         ),
                       ),
-                      Text('${zoomLevel.toStringAsFixed(1)}x', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      Text('${zoomLevel.toStringAsFixed(1)}x',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12)),
                     ],
                   ),
                   const SizedBox(height: 14),
@@ -1027,12 +1180,14 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         return ChoiceChip(
                           label: Text(filterNames[idx]),
                           selected: isSel,
-                          onSelected: (s) => setStudioState(() => activeFilterIndex = idx),
+                          onSelected: (s) =>
+                              setStudioState(() => activeFilterIndex = idx),
                           selectedColor: _kAccentCyan.withOpacity(0.3),
                           backgroundColor: _kGlassElevated,
                           labelStyle: TextStyle(
                             color: isSel ? _kAccentCyan : Colors.white70,
-                            fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                            fontWeight:
+                                isSel ? FontWeight.w700 : FontWeight.w500,
                             fontSize: 12,
                           ),
                         );
@@ -1051,22 +1206,26 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                       MockData.selfUser.avatarUrl = updatedUrl;
                       if (widget.isSelf) {
                         try {
-                          final auth = Provider.of<AuthProvider>(context, listen: false);
+                          final auth =
+                              Provider.of<AuthProvider>(context, listen: false);
                           await auth.updateProfile(avatarUrl: updatedUrl);
                         } catch (e) {
-                          debugPrint('Error saving studio avatar to Supabase: $e');
+                          debugPrint(
+                              'Error saving studio avatar to Supabase: $e');
                         }
                       }
                       if (mounted) {
                         Navigator.pop(ctx);
-                        _showGlassToast('Profile photo saved to database!', icon: LucideIcons.check, isSuccess: true);
+                        _showGlassToast('Profile photo saved to database!',
+                            icon: LucideIcons.check, isSuccess: true);
                       }
                     },
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [_kAccentCyan, Color(0xFF2563EB)]),
+                        gradient: const LinearGradient(
+                            colors: [_kAccentCyan, Color(0xFF2563EB)]),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
@@ -1080,11 +1239,15 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(LucideIcons.check, color: Colors.white, size: 18),
+                          Icon(LucideIcons.check,
+                              color: Colors.white, size: 18),
                           SizedBox(width: 8),
                           Text(
                             'Save & Set Everywhere',
-                            style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
@@ -1119,32 +1282,47 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 child: Container(
                   width: 36,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 16),
               ListTile(
                 leading: const Icon(LucideIcons.barChart2, color: _kAccentCyan),
-                title: const Text('Show Statistics', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: const Text('View unique account impressions & metrics', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                title: const Text('Show Statistics',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: const Text(
+                    'View unique account impressions & metrics',
+                    style: TextStyle(color: Colors.white54, fontSize: 12)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showPostStatisticsModal(post);
                 },
               ),
               ListTile(
-                leading: const Icon(LucideIcons.pencil, color: Color(0xFF38BDF8)),
-                title: const Text('Edit Description', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: const Text('Modify caption & snippet text', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                leading:
+                    const Icon(LucideIcons.pencil, color: Color(0xFF38BDF8)),
+                title: const Text('Edit Description',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: const Text('Modify caption & snippet text',
+                    style: TextStyle(color: Colors.white54, fontSize: 12)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showEditPostDescriptionModal(post);
                 },
               ),
               ListTile(
-                leading: const Icon(LucideIcons.eyeOff, color: Color(0xFFF59E0B)),
-                title: const Text('Hide Options', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: const Text('Independent toggles for likes, comments, and post', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                leading:
+                    const Icon(LucideIcons.eyeOff, color: Color(0xFFF59E0B)),
+                title: const Text('Hide Options',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: const Text(
+                    'Independent toggles for likes, comments, and post',
+                    style: TextStyle(color: Colors.white54, fontSize: 12)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showPostHideOptionsModal(post);
@@ -1152,8 +1330,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               ),
               Divider(color: Colors.white.withOpacity(0.1)),
               ListTile(
-                leading: const Icon(LucideIcons.trash2, color: Color(0xFFEF4444)),
-                title: const Text('Delete Post', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w700)),
+                leading:
+                    const Icon(LucideIcons.trash2, color: Color(0xFFEF4444)),
+                title: const Text('Delete Post',
+                    style: TextStyle(
+                        color: Color(0xFFEF4444), fontWeight: FontWeight.w700)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _confirmDeletePost(post);
@@ -1179,7 +1360,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
               decoration: BoxDecoration(
                 color: const Color(0xFF0F1016).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
                 border: Border.all(color: Colors.white.withOpacity(0.15)),
               ),
               child: Column(
@@ -1190,17 +1372,23 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     child: Container(
                       width: 36,
                       height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
                   const SizedBox(height: 16),
                   Row(
                     children: const [
-                      Icon(LucideIcons.eyeOff, color: Color(0xFFF59E0B), size: 20),
+                      Icon(LucideIcons.eyeOff,
+                          color: Color(0xFFF59E0B), size: 20),
                       SizedBox(width: 10),
                       Text(
                         'Post Visibility & Privacy',
-                        style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -1215,13 +1403,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     activeColor: _kAccentCyan,
-                    title: const Text('Hide Likes Counter', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text('Only you will see total likes on this post', style: TextStyle(color: Colors.white54, fontSize: 11.5)),
+                    title: const Text('Hide Likes Counter',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14)),
+                    subtitle: const Text(
+                        'Only you will see total likes on this post',
+                        style:
+                            TextStyle(color: Colors.white54, fontSize: 11.5)),
                     value: post.hideLikes,
                     onChanged: (val) {
                       setModalState(() => post.hideLikes = val);
                       setState(() {});
-                      _showGlassToast(val ? 'Likes counter hidden' : 'Likes counter visible', icon: LucideIcons.heart);
+                      _showGlassToast(
+                          val
+                              ? 'Likes counter hidden'
+                              : 'Likes counter visible',
+                          icon: LucideIcons.heart);
                     },
                   ),
                   Divider(color: Colors.white.withOpacity(0.08)),
@@ -1230,13 +1429,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     activeColor: _kAccentCyan,
-                    title: const Text('Hide Comments Section', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text('Disables comments and hides replies from public view', style: TextStyle(color: Colors.white54, fontSize: 11.5)),
+                    title: const Text('Hide Comments Section',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14)),
+                    subtitle: const Text(
+                        'Disables comments and hides replies from public view',
+                        style:
+                            TextStyle(color: Colors.white54, fontSize: 11.5)),
                     value: post.hideComments,
                     onChanged: (val) {
                       setModalState(() => post.hideComments = val);
                       setState(() {});
-                      _showGlassToast(val ? 'Comments hidden & disabled' : 'Comments enabled', icon: LucideIcons.messageSquare);
+                      _showGlassToast(
+                          val
+                              ? 'Comments hidden & disabled'
+                              : 'Comments enabled',
+                          icon: LucideIcons.messageSquare);
                     },
                   ),
                   Divider(color: Colors.white.withOpacity(0.08)),
@@ -1245,13 +1455,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     activeColor: const Color(0xFFEF4444),
-                    title: const Text('Hide Post from Feed & Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text('Hides this post from public exploration and home feed', style: TextStyle(color: Colors.white54, fontSize: 11.5)),
+                    title: const Text('Hide Post from Feed & Profile',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14)),
+                    subtitle: const Text(
+                        'Hides this post from public exploration and home feed',
+                        style:
+                            TextStyle(color: Colors.white54, fontSize: 11.5)),
                     value: post.hidePost,
                     onChanged: (val) {
                       setModalState(() => post.hidePost = val);
                       setState(() {});
-                      _showGlassToast(val ? 'Post hidden from feed & profile' : 'Post visible on profile', icon: LucideIcons.eyeOff);
+                      _showGlassToast(
+                          val
+                              ? 'Post hidden from feed & profile'
+                              : 'Post visible on profile',
+                          icon: LucideIcons.eyeOff);
                     },
                   ),
                   const SizedBox(height: 18),
@@ -1266,7 +1487,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         borderRadius: BorderRadius.circular(14),
                       ),
                       alignment: Alignment.center,
-                      child: const Text('Done', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14)),
+                      child: const Text('Done',
+                          style: TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14)),
                     ),
                   ),
                 ],
@@ -1291,7 +1516,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
               decoration: BoxDecoration(
                 color: const Color(0xFF0F1016).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(24)),
                 border: Border.all(color: Colors.white.withOpacity(0.15)),
               ),
               child: Column(
@@ -1302,17 +1528,23 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     child: Container(
                       width: 36,
                       height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
                   const SizedBox(height: 16),
                   Row(
                     children: const [
-                      Icon(LucideIcons.eyeOff, color: Color(0xFFF59E0B), size: 20),
+                      Icon(LucideIcons.eyeOff,
+                          color: Color(0xFFF59E0B), size: 20),
                       SizedBox(width: 10),
                       Text(
                         'Media Visibility & Privacy',
-                        style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -1327,13 +1559,21 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     activeColor: _kAccentCyan,
-                    title: const Text('Hide Likes Counter', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text('Hides total like count from public viewers', style: TextStyle(color: Colors.white54, fontSize: 11.5)),
+                    title: const Text('Hide Likes Counter',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14)),
+                    subtitle: const Text(
+                        'Hides total like count from public viewers',
+                        style:
+                            TextStyle(color: Colors.white54, fontSize: 11.5)),
                     value: item.hideLikes,
                     onChanged: (val) {
                       setModalState(() => item.hideLikes = val);
                       setState(() {});
-                      _showGlassToast(val ? 'Likes hidden' : 'Likes visible', icon: LucideIcons.heart);
+                      _showGlassToast(val ? 'Likes hidden' : 'Likes visible',
+                          icon: LucideIcons.heart);
                     },
                   ),
                   Divider(color: Colors.white.withOpacity(0.08)),
@@ -1342,13 +1582,22 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     activeColor: _kAccentCyan,
-                    title: const Text('Hide Comments Section', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text('Disables comment thread and hide responses', style: TextStyle(color: Colors.white54, fontSize: 11.5)),
+                    title: const Text('Hide Comments Section',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14)),
+                    subtitle: const Text(
+                        'Disables comment thread and hide responses',
+                        style:
+                            TextStyle(color: Colors.white54, fontSize: 11.5)),
                     value: item.hideComments,
                     onChanged: (val) {
                       setModalState(() => item.hideComments = val);
                       setState(() {});
-                      _showGlassToast(val ? 'Comments hidden' : 'Comments enabled', icon: LucideIcons.messageSquare);
+                      _showGlassToast(
+                          val ? 'Comments hidden' : 'Comments enabled',
+                          icon: LucideIcons.messageSquare);
                     },
                   ),
                   Divider(color: Colors.white.withOpacity(0.08)),
@@ -1357,13 +1606,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     activeColor: const Color(0xFFEF4444),
-                    title: const Text('Hide Media from Profile Grid', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text('Only visible to you with a hidden status banner', style: TextStyle(color: Colors.white54, fontSize: 11.5)),
+                    title: const Text('Hide Media from Profile Grid',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14)),
+                    subtitle: const Text(
+                        'Only visible to you with a hidden status banner',
+                        style:
+                            TextStyle(color: Colors.white54, fontSize: 11.5)),
                     value: item.hidePost,
                     onChanged: (val) {
                       setModalState(() => item.hidePost = val);
                       setState(() {});
-                      _showGlassToast(val ? 'Media hidden from grid' : 'Media visible on grid', icon: LucideIcons.eyeOff);
+                      _showGlassToast(
+                          val
+                              ? 'Media hidden from grid'
+                              : 'Media visible on grid',
+                          icon: LucideIcons.eyeOff);
                     },
                   ),
                   const SizedBox(height: 18),
@@ -1378,7 +1638,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         borderRadius: BorderRadius.circular(14),
                       ),
                       alignment: Alignment.center,
-                      child: const Text('Done', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14)),
+                      child: const Text('Done',
+                          style: TextStyle(
+                              color: Colors.black,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14)),
                     ),
                   ),
                 ],
@@ -1392,7 +1656,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
 
   void _showPostStatisticsModal(UserPostItem post) {
     final uniqueViews = (post.likesCount * 8 + 342);
-    final engagementRate = ((post.likesCount + post.commentsCount) / uniqueViews * 100).toStringAsFixed(1);
+    final engagementRate =
+        ((post.likesCount + post.commentsCount) / uniqueViews * 100)
+            .toStringAsFixed(1);
 
     showModalBottomSheet(
       context: context,
@@ -1414,7 +1680,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 child: Container(
                   width: 38,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -1423,13 +1691,19 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 children: [
                   Row(
                     children: const [
-                      Icon(LucideIcons.barChart3, color: _kAccentCyan, size: 22),
+                      Icon(LucideIcons.barChart3,
+                          color: _kAccentCyan, size: 22),
                       SizedBox(width: 8),
-                      Text('Post Statistics & Reach', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                      Text('Post Statistics & Reach',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold)),
                     ],
                   ),
                   IconButton(
-                    icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                    icon: const Icon(LucideIcons.x,
+                        color: Colors.white70, size: 20),
                     onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
@@ -1451,21 +1725,31 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Unique Accounts Viewed', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        const Text('Unique Accounts Viewed',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 13)),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: _kAccentCyan.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: const Text('1 View / Account', style: TextStyle(color: _kAccentCyan, fontSize: 10.5, fontWeight: FontWeight.bold)),
+                          child: const Text('1 View / Account',
+                              style: TextStyle(
+                                  color: _kAccentCyan,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '$uniqueViews',
-                      style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 32,
+                          fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 4),
                     const Text(
@@ -1486,16 +1770,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.06),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withOpacity(0.1)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.1)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(LucideIcons.heart, color: Color(0xFFFF5252), size: 18),
+                          const Icon(LucideIcons.heart,
+                              color: Color(0xFFFF5252), size: 18),
                           const SizedBox(height: 8),
-                          Text('${post.likesCount}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text('${post.likesCount}',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold)),
                           const SizedBox(height: 2),
-                          const Text('Total Likes', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                          const Text('Total Likes',
+                              style: TextStyle(
+                                  color: Colors.white54, fontSize: 11)),
                         ],
                       ),
                     ),
@@ -1507,16 +1799,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.06),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withOpacity(0.1)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.1)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(LucideIcons.messageSquare, color: Color(0xFF69F0AE), size: 18),
+                          const Icon(LucideIcons.messageSquare,
+                              color: Color(0xFF69F0AE), size: 18),
                           const SizedBox(height: 8),
-                          Text('${post.commentsCount}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text('${post.commentsCount}',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold)),
                           const SizedBox(height: 2),
-                          const Text('Comments', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                          const Text('Comments',
+                              style: TextStyle(
+                                  color: Colors.white54, fontSize: 11)),
                         ],
                       ),
                     ),
@@ -1528,16 +1828,24 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.06),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withOpacity(0.1)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.1)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(LucideIcons.zap, color: Color(0xFFFFD700), size: 18),
+                          const Icon(LucideIcons.zap,
+                              color: Color(0xFFFFD700), size: 18),
                           const SizedBox(height: 8),
-                          Text('$engagementRate%', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text('$engagementRate%',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold)),
                           const SizedBox(height: 2),
-                          const Text('Engagement', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                          const Text('Engagement',
+                              style: TextStyle(
+                                  color: Colors.white54, fontSize: 11)),
                         ],
                       ),
                     ),
@@ -1565,7 +1873,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
             borderRadius: BorderRadius.circular(20),
             side: const BorderSide(color: _kGlassBorder),
           ),
-          title: const Text('Edit Description', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+          title: const Text('Edit Description',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold)),
           content: TextField(
             controller: editCtrl,
             maxLines: 4,
@@ -1573,13 +1885,16 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
             decoration: InputDecoration(
               filled: true,
               fillColor: Colors.white.withOpacity(0.06),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kGlassBorder)),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: _kGlassBorder)),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dCtx),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.white60)),
             ),
             SpringButton(
               onTap: () {
@@ -1587,15 +1902,19 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   post.content = editCtrl.text.trim();
                 });
                 Navigator.pop(dCtx);
-                _showGlassToast('Post description updated!', icon: LucideIcons.check);
+                _showGlassToast('Post description updated!',
+                    icon: LucideIcons.check);
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: _kAccentCyan,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w700)),
+                child: const Text('Save',
+                    style: TextStyle(
+                        color: Colors.black, fontWeight: FontWeight.w700)),
               ),
             ),
           ],
@@ -1619,7 +1938,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
             children: [
               Icon(LucideIcons.trash2, color: Color(0xFFEF4444), size: 20),
               SizedBox(width: 8),
-              Text('Delete Post?', style: TextStyle(color: Colors.white, fontSize: 17)),
+              Text('Delete Post?',
+                  style: TextStyle(color: Colors.white, fontSize: 17)),
             ],
           ),
           content: const Text(
@@ -1629,25 +1949,30 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.white60)),
             ),
             SpringButton(
               onTap: () {
                 setState(() {
                   widget.user.posts.removeWhere((p) => p.id == post.id);
-                  widget.user.postsCount = (widget.user.postsCount - 1).clamp(0, 9999);
+                  widget.user.postsCount =
+                      (widget.user.postsCount - 1).clamp(0, 9999);
                 });
                 Navigator.pop(ctx);
                 _showGlassToast('Post deleted', icon: LucideIcons.trash2);
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: const Color(0xFFEF4444).withOpacity(0.2),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: const Color(0xFFEF4444)),
                 ),
-                child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
+                child: const Text('Delete',
+                    style: TextStyle(
+                        color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -1671,7 +1996,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
             children: [
               Icon(LucideIcons.trash2, color: Color(0xFFEF4444), size: 20),
               SizedBox(width: 8),
-              Text('Delete Media?', style: TextStyle(color: Colors.white, fontSize: 17)),
+              Text('Delete Media?',
+                  style: TextStyle(color: Colors.white, fontSize: 17)),
             ],
           ),
           content: Text(
@@ -1681,25 +2007,30 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.white60)),
             ),
             SpringButton(
               onTap: () {
                 setState(() {
                   widget.user.mediaItems.removeWhere((m) => m.id == item.id);
-                  widget.user.postsCount = (widget.user.postsCount - 1).clamp(0, 9999);
+                  widget.user.postsCount =
+                      (widget.user.postsCount - 1).clamp(0, 9999);
                 });
                 Navigator.pop(ctx);
                 _showGlassToast('Media deleted', icon: LucideIcons.trash2);
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: const Color(0xFFEF4444).withOpacity(0.2),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: const Color(0xFFEF4444)),
                 ),
-                child: const Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
+                child: const Text('Delete',
+                    style: TextStyle(
+                        color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -1739,7 +2070,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 child: Container(
                   width: 38,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -1750,11 +2083,16 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     children: [
                       Icon(LucideIcons.camera, color: _kAccentCyan, size: 20),
                       SizedBox(width: 8),
-                      Text('Profile Photo Options', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                      Text('Profile Photo Options',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold)),
                     ],
                   ),
                   IconButton(
-                    icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                    icon: const Icon(LucideIcons.x,
+                        color: Colors.white70, size: 20),
                     onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
@@ -1769,12 +2107,14 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   if (picked != null) {
                     _openAvatarStudio(picked.pathOrDataUrl);
                   } else {
-                    _showGlassToast('No photo selected', icon: LucideIcons.imageOff, isSuccess: false);
+                    _showGlassToast('No photo selected',
+                        icon: LucideIcons.imageOff, isSuccess: false);
                   }
                 },
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: _kAccentCyan.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(16),
@@ -1782,19 +2122,28 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   ),
                   child: const Row(
                     children: [
-                      Icon(LucideIcons.uploadCloud, color: _kAccentCyan, size: 22),
+                      Icon(LucideIcons.uploadCloud,
+                          color: _kAccentCyan, size: 22),
                       SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Choose from Device / Photos', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                            Text('Choose from Device / Photos',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14)),
                             SizedBox(height: 2),
-                            Text('Pick from gallery, internal files, crop & tint', style: TextStyle(color: Colors.white60, fontSize: 11.5)),
+                            Text(
+                                'Pick from gallery, internal files, crop & tint',
+                                style: TextStyle(
+                                    color: Colors.white60, fontSize: 11.5)),
                           ],
                         ),
                       ),
-                      Icon(LucideIcons.chevronRight, color: _kAccentCyan, size: 18),
+                      Icon(LucideIcons.chevronRight,
+                          color: _kAccentCyan, size: 18),
                     ],
                   ),
                 ),
@@ -1802,7 +2151,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               const SizedBox(height: 14),
 
               // 2. Preset Avatars
-              const Text('Or Pick a Curated Developer Avatar:', style: TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w600)),
+              const Text('Or Pick a Curated Developer Avatar:',
+                  style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600)),
               const SizedBox(height: 10),
               SizedBox(
                 height: 64,
@@ -1822,7 +2175,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         height: 60,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: _kAccentCyan.withOpacity(0.6), width: 2),
+                          border: Border.all(
+                              color: _kAccentCyan.withOpacity(0.6), width: 2),
                           image: DecorationImage(
                             image: NetworkImage(avatarUrl),
                             fit: BoxFit.cover,
@@ -1840,8 +2194,10 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 color: Colors.transparent,
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(LucideIcons.expand, color: Colors.white70),
-                  title: const Text('View Current Photo Fullscreen', style: TextStyle(color: Colors.white, fontSize: 13.5)),
+                  leading:
+                      const Icon(LucideIcons.expand, color: Colors.white70),
+                  title: const Text('View Current Photo Fullscreen',
+                      style: TextStyle(color: Colors.white, fontSize: 13.5)),
                   onTap: () {
                     Navigator.pop(ctx);
                     FullScreenImageViewer.show(
@@ -1910,8 +2266,10 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               ListTile(
                 leading: const Icon(LucideIcons.barChart2, color: _kAccentCyan),
                 title: const Text('Show Statistics',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: const Text('View unique account impressions & metrics',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: const Text(
+                    'View unique account impressions & metrics',
                     style: TextStyle(color: Colors.white54, fontSize: 12)),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -1919,9 +2277,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 },
               ),
               ListTile(
-                leading: const Icon(LucideIcons.pencil, color: Color(0xFF38BDF8)),
+                leading:
+                    const Icon(LucideIcons.pencil, color: Color(0xFF38BDF8)),
                 title: const Text('Edit Description',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
                 subtitle: const Text('Modify title & media details',
                     style: TextStyle(color: Colors.white54, fontSize: 12)),
                 onTap: () {
@@ -1930,10 +2290,13 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 },
               ),
               ListTile(
-                leading: const Icon(LucideIcons.eyeOff, color: Color(0xFFF59E0B)),
+                leading:
+                    const Icon(LucideIcons.eyeOff, color: Color(0xFFF59E0B)),
                 title: const Text('Hide Options',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                subtitle: const Text('Independent toggles for likes, comments, and media',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
+                subtitle: const Text(
+                    'Independent toggles for likes, comments, and media',
                     style: TextStyle(color: Colors.white54, fontSize: 12)),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -1942,9 +2305,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               ),
               Divider(color: Colors.white.withOpacity(0.1)),
               ListTile(
-                leading: const Icon(LucideIcons.trash2, color: Color(0xFFEF4444)),
+                leading:
+                    const Icon(LucideIcons.trash2, color: Color(0xFFEF4444)),
                 title: const Text('Delete Media',
-                    style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.w700)),
+                    style: TextStyle(
+                        color: Color(0xFFEF4444), fontWeight: FontWeight.w700)),
                 onTap: () {
                   Navigator.pop(ctx);
                   _confirmDeleteMedia(item);
@@ -1959,9 +2324,12 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
 
   void _showMediaStatisticsModal(UserMediaItem item) {
     // Unique views: each distinct user account gives strictly 1 view
-    final uniqueViews = (item.viewsCount > 0 ? (item.viewsCount * 0.88).round() : (item.likesCount * 6 + 184));
+    final uniqueViews = (item.viewsCount > 0
+        ? (item.viewsCount * 0.88).round()
+        : (item.likesCount * 6 + 184));
     final totalImpressions = (uniqueViews * 1.35).round();
-    final engagementRate = ((item.likesCount * 1.5) / uniqueViews * 100).toStringAsFixed(1);
+    final engagementRate =
+        ((item.likesCount * 1.5) / uniqueViews * 100).toStringAsFixed(1);
 
     showModalBottomSheet(
       context: context,
@@ -1983,7 +2351,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 child: Container(
                   width: 38,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -1992,13 +2362,19 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 children: [
                   Row(
                     children: const [
-                      Icon(LucideIcons.barChart3, color: _kAccentCyan, size: 22),
+                      Icon(LucideIcons.barChart3,
+                          color: _kAccentCyan, size: 22),
                       SizedBox(width: 8),
-                      Text('Media Statistics & Reach', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                      Text('Media Statistics & Reach',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold)),
                     ],
                   ),
                   IconButton(
-                    icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                    icon: const Icon(LucideIcons.x,
+                        color: Colors.white70, size: 20),
                     onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
@@ -2020,26 +2396,37 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Unique Accounts Viewed', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        const Text('Unique Accounts Viewed',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 13)),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: _kAccentCyan.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: const Text('1 View / Distinct Account', style: TextStyle(color: _kAccentCyan, fontSize: 10.5, fontWeight: FontWeight.bold)),
+                          child: const Text('1 View / Distinct Account',
+                              style: TextStyle(
+                                  color: _kAccentCyan,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '$uniqueViews',
-                      style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 32,
+                          fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Out of $totalImpressions total impressions across feed and search',
-                      style: const TextStyle(color: Colors.white54, fontSize: 11.5),
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 11.5),
                     ),
                   ],
                 ),
@@ -2062,13 +2449,20 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         children: [
                           const Row(
                             children: [
-                              Icon(LucideIcons.heart, size: 14, color: _kAccentPink),
+                              Icon(LucideIcons.heart,
+                                  size: 14, color: _kAccentPink),
                               SizedBox(width: 6),
-                              Text('Likes', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                              Text('Likes',
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 12)),
                             ],
                           ),
                           const SizedBox(height: 6),
-                          Text('${item.likesCount}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text('${item.likesCount}',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
@@ -2087,13 +2481,20 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         children: [
                           const Row(
                             children: [
-                              Icon(LucideIcons.activity, size: 14, color: Color(0xFF10B981)),
+                              Icon(LucideIcons.activity,
+                                  size: 14, color: Color(0xFF10B981)),
                               SizedBox(width: 6),
-                              Text('Engagement', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                              Text('Engagement',
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 12)),
                             ],
                           ),
                           const SizedBox(height: 6),
-                          Text('$engagementRate%', style: const TextStyle(color: Color(0xFF10B981), fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text('$engagementRate%',
+                              style: const TextStyle(
+                                  color: Color(0xFF10B981),
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
@@ -2117,7 +2518,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
       builder: (ctx) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
-          padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+          padding: EdgeInsets.fromLTRB(
+              20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
           decoration: BoxDecoration(
             color: const Color(0xFF0C0E14).withOpacity(0.96),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
@@ -2131,11 +2533,17 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 child: Container(
                   width: 38,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
               ),
               const SizedBox(height: 16),
-              const Text('Edit Media Title & Info', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+              const Text('Edit Media Title & Info',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               TextField(
                 controller: titleCtrl,
@@ -2145,7 +2553,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   labelStyle: const TextStyle(color: Colors.white70),
                   filled: true,
                   fillColor: Colors.white.withOpacity(0.06),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -2164,11 +2573,14 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [_kAccentCyan, Color(0xFF2563EB)]),
+                    gradient: const LinearGradient(
+                        colors: [_kAccentCyan, Color(0xFF2563EB)]),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   alignment: Alignment.center,
-                  child: const Text('Save Changes', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: const Text('Save Changes',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -2178,7 +2590,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
     );
   }
 
-  Widget _buildEditField(String label, TextEditingController controller, IconData icon, {int maxLines = 1}) {
+  Widget _buildEditField(
+      String label, TextEditingController controller, IconData icon,
+      {int maxLines = 1}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2186,7 +2600,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
           children: [
             Icon(icon, size: 13, color: _kAccentCyan),
             const SizedBox(width: 6),
-            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600)),
           ],
         ),
         const SizedBox(height: 6),
@@ -2204,20 +2622,26 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
           child: TextField(
             controller: controller,
             maxLines: maxLines,
-            style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w400),
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w400),
             cursorColor: Colors.white,
             decoration: InputDecoration(
               hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
               filled: true,
               fillColor: Colors.white.withOpacity(0.07),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: Colors.white.withOpacity(0.14), width: 1.0),
+                borderSide: BorderSide(
+                    color: Colors.white.withOpacity(0.14), width: 1.0),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: Colors.white.withOpacity(0.14), width: 1.0),
+                borderSide: BorderSide(
+                    color: Colors.white.withOpacity(0.14), width: 1.0),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -2230,7 +2654,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
     );
   }
 
-  void _showGlassToast(String message, {IconData? icon, bool isSuccess = false}) {
+  void _showGlassToast(String message,
+      {IconData? icon, bool isSuccess = false}) {
     MorphingCapsule.show(
       context,
       icon: icon ?? (isSuccess ? LucideIcons.checkCircle2 : LucideIcons.info),
@@ -2250,12 +2675,15 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                 decoration: BoxDecoration(
                   color: const Color(0xFF121318).withOpacity(0.92),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isSuccess ? _kAccentCyan.withOpacity(0.4) : _kGlassBorder,
+                    color: isSuccess
+                        ? _kAccentCyan.withOpacity(0.4)
+                        : _kGlassBorder,
                     width: 1,
                   ),
                   boxShadow: [
@@ -2300,23 +2728,28 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
   }
 
   void _openReelsFromMedia(int initialIndex, List<UserMediaItem> items) {
-    final posts = items.map((item) => FeedPost(
-      id: item.id,
-      username: widget.user.name,
-      location: widget.user.location,
-      avatarUrl: widget.user.avatarUrl,
-      imageUrl: item.mediaUrl.isNotEmpty ? item.mediaUrl : item.thumbnailUrl,
-      commentsCount: (item.likesCount * 0.18).round() + 4,
-      sharesCount: (item.likesCount * 0.08).round() + 2,
-      likesCount: item.likesCount,
-      captionTitle: item.title,
-      captionBody: '${item.title} • ${item.fileSize} • Uploaded ${item.timestamp}',
-      musicTitle: 'Original Audio',
-      musicArtist: widget.user.name,
-      musicCoverUrl: widget.user.avatarUrl,
-      likedByAvatars: [widget.user.avatarUrl],
-      likedByText: 'Liked by ${widget.user.name} and ${item.likesCount} others',
-    )).toList();
+    final posts = items
+        .map((item) => FeedPost(
+              id: item.id,
+              username: widget.user.name,
+              location: widget.user.location,
+              avatarUrl: widget.user.avatarUrl,
+              imageUrl:
+                  item.mediaUrl.isNotEmpty ? item.mediaUrl : item.thumbnailUrl,
+              commentsCount: (item.likesCount * 0.18).round() + 4,
+              sharesCount: (item.likesCount * 0.08).round() + 2,
+              likesCount: item.likesCount,
+              captionTitle: item.title,
+              captionBody:
+                  '${item.title} • ${item.fileSize} • Uploaded ${item.timestamp}',
+              musicTitle: 'Original Audio',
+              musicArtist: widget.user.name,
+              musicCoverUrl: widget.user.avatarUrl,
+              likedByAvatars: [widget.user.avatarUrl],
+              likedByText:
+                  'Liked by ${widget.user.name} and ${item.likesCount} others',
+            ))
+        .toList();
 
     Navigator.of(context).push(
       PageRouteBuilder(
@@ -2673,14 +3106,15 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(12),
                                   child: BackdropFilter(
-                                    filter:
-                                        ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                                    filter: ImageFilter.blur(
+                                        sigmaX: 12, sigmaY: 12),
                                     child: Container(
                                       padding: const EdgeInsets.all(8),
                                       decoration: BoxDecoration(
                                         color: Colors.black.withOpacity(0.5),
                                         borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: _kGlassBorder),
+                                        border:
+                                            Border.all(color: _kGlassBorder),
                                       ),
                                       child: const Icon(LucideIcons.arrowLeft,
                                           color: Colors.white, size: 18),
@@ -2690,7 +3124,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                               )
                             else
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
                                   color: Colors.black.withOpacity(0.5),
                                   borderRadius: BorderRadius.circular(12),
@@ -2717,14 +3152,17 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(12),
                                   child: BackdropFilter(
-                                    filter:
-                                        ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                                    filter: ImageFilter.blur(
+                                        sigmaX: 12, sigmaY: 12),
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 8),
                                       decoration: BoxDecoration(
                                         color: Colors.black.withOpacity(0.5),
                                         borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: _kAccentCyan.withOpacity(0.4)),
+                                        border: Border.all(
+                                            color:
+                                                _kAccentCyan.withOpacity(0.4)),
                                       ),
                                       child: const Row(
                                         mainAxisSize: MainAxisSize.min,
@@ -2754,14 +3192,15 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(12),
                                   child: BackdropFilter(
-                                    filter:
-                                        ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                                    filter: ImageFilter.blur(
+                                        sigmaX: 12, sigmaY: 12),
                                     child: Container(
                                       padding: const EdgeInsets.all(8),
                                       decoration: BoxDecoration(
                                         color: Colors.black.withOpacity(0.5),
                                         borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: _kGlassBorder),
+                                        border:
+                                            Border.all(color: _kGlassBorder),
                                       ),
                                       child: const Icon(LucideIcons.share2,
                                           color: Colors.white, size: 18),
@@ -2812,12 +3251,16 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                       ? Image.network(
                                           user.avatarUrl,
                                           fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => const Center(
-                                            child: Icon(LucideIcons.user, color: Colors.white70, size: 40),
+                                          errorBuilder: (_, __, ___) =>
+                                              const Center(
+                                            child: Icon(LucideIcons.user,
+                                                color: Colors.white70,
+                                                size: 40),
                                           ),
                                         )
                                       : const Center(
-                                          child: Icon(LucideIcons.user, color: Colors.white70, size: 40),
+                                          child: Icon(LucideIcons.user,
+                                              color: Colors.white70, size: 40),
                                         ),
                                 ),
                               ),
@@ -2834,7 +3277,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                   decoration: BoxDecoration(
                                     color: const Color(0xFF161822),
                                     shape: BoxShape.circle,
-                                    border: Border.all(color: _kAccentCyan, width: 1.5),
+                                    border: Border.all(
+                                        color: _kAccentCyan, width: 1.5),
                                     boxShadow: [
                                       BoxShadow(
                                         color: Colors.black.withOpacity(0.5),
@@ -2860,8 +3304,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                 decoration: BoxDecoration(
                                   color: const Color(0xFF10B981),
                                   shape: BoxShape.circle,
-                                  border: Border.all(
-                                      color: _kBgDark, width: 2.5),
+                                  border:
+                                      Border.all(color: _kBgDark, width: 2.5),
                                 ),
                               ),
                             ),
@@ -3090,7 +3534,6 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
                   // Name, Handle, Role Badge
                   Wrap(
                     crossAxisAlignment: WrapCrossAlignment.center,
@@ -3185,7 +3628,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                   ],
 
                   // Location & Department wrap
-                  if (user.location.isNotEmpty || user.department.isNotEmpty) ...[
+                  if (user.location.isNotEmpty ||
+                      user.department.isNotEmpty) ...[
                     Wrap(
                       spacing: 14,
                       runSpacing: 6,
@@ -3244,10 +3688,11 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
                           children: [
-                            _buildStatItem('Snapped', '$_followersCount', onTap: () => _openAccounts(0)),
+                            _buildStatItem('Snapped', '$_followersCount',
+                                onTap: () => _openAccounts(0)),
                             _buildStatDivider(),
-                            _buildStatItem(
-                                'Snapping', '${user.followingCount}', onTap: () => _openAccounts(1)),
+                            _buildStatItem('Snapping', '${user.followingCount}',
+                                onTap: () => _openAccounts(1)),
                             _buildStatDivider(),
                             _buildStatItem(
                                 'Media', '${user.mediaItems.length}'),
@@ -3619,14 +4064,18 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
                                       child: BackdropFilter(
-                                        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                        filter: ImageFilter.blur(
+                                            sigmaX: 8, sigmaY: 8),
                                         child: Container(
                                           padding: const EdgeInsets.all(5),
                                           decoration: BoxDecoration(
-                                            color: Colors.black.withOpacity(0.65),
-                                            borderRadius: BorderRadius.circular(8),
+                                            color:
+                                                Colors.black.withOpacity(0.65),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
                                             border: Border.all(
-                                              color: Colors.white.withOpacity(0.3),
+                                              color:
+                                                  Colors.white.withOpacity(0.3),
                                               width: 0.8,
                                             ),
                                           ),
@@ -3666,7 +4115,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                               ? const SizedBox(
                                                   width: 10,
                                                   height: 10,
-                                                  child: CircularProgressIndicator(
+                                                  child:
+                                                      CircularProgressIndicator(
                                                     strokeWidth: 1.5,
                                                     color: Colors.white,
                                                   ),
@@ -3723,7 +4173,9 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                                       size: 9, color: Colors.white70),
                                   const SizedBox(width: 2),
                                   Text(
-                                    item.hideLikes ? 'Hidden' : '${item.likesCount}',
+                                    item.hideLikes
+                                        ? 'Hidden'
+                                        : '${item.likesCount}',
                                     style: const TextStyle(
                                       color: Colors.white70,
                                       fontSize: 9,
@@ -3775,7 +4227,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
           decoration: BoxDecoration(
             color: const Color(0xFF131418),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: post.hidePost ? const Color(0x66EF4444) : _kGlassBorder),
+            border: Border.all(
+                color: post.hidePost ? const Color(0x66EF4444) : _kGlassBorder),
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -3790,8 +4243,7 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                       children: [
                         CircleAvatar(
                           radius: 14,
-                          backgroundImage:
-                              NetworkImage(widget.user.avatarUrl),
+                          backgroundImage: NetworkImage(widget.user.avatarUrl),
                         ),
                         const SizedBox(width: 8),
                         Text(
@@ -3813,18 +4265,25 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                         if (post.hidePost) ...[
                           const SizedBox(width: 6),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1.5),
                             decoration: BoxDecoration(
                               color: const Color(0x2EEF4444),
                               borderRadius: BorderRadius.circular(5),
-                              border: Border.all(color: const Color(0x55EF4444)),
+                              border:
+                                  Border.all(color: const Color(0x55EF4444)),
                             ),
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(LucideIcons.eyeOff, size: 9, color: Color(0xFFEF4444)),
+                                Icon(LucideIcons.eyeOff,
+                                    size: 9, color: Color(0xFFEF4444)),
                                 SizedBox(width: 3),
-                                Text('Hidden', style: TextStyle(color: Color(0xFFEF4444), fontSize: 9.5, fontWeight: FontWeight.bold)),
+                                Text('Hidden',
+                                    style: TextStyle(
+                                        color: Color(0xFFEF4444),
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold)),
                               ],
                             ),
                           ),
@@ -4090,8 +4549,8 @@ class _UserProfileDetailScreenState extends State<UserProfileDetailScreen>
                 runSpacing: 6,
                 children: project.techStack.map((tech) {
                   return Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: _kGlassElevated,
                       borderRadius: BorderRadius.circular(6),

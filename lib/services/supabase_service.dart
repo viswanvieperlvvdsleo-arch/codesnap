@@ -64,8 +64,22 @@ class SupabaseService {
   static const String tableFollowers = 'followers';
   static const String tableConversations = 'conversations';
   static const String tableMessages = 'messages';
+  static const String tableMessageReactions = 'message_reactions';
+  static const String tableMessageUserFlags = 'message_user_flags';
+  static const String tableChatCalls = 'chat_calls';
+  static const String tableAiThreads = 'ai_threads';
+  static const String tableAiMessages = 'ai_messages';
   static const String tableNotifications = 'notifications';
   static const String tableWorkspaceProjects = 'workspace_projects';
   static const String tableWorkspaceFiles = 'workspace_files';
+  static const String tableNoteDocuments = 'note_documents';
+  static const String tableNotePurchases = 'note_purchases';
+  static const String tableArenaEvents = 'arena_events';
+  static const String tableArenaTeams = 'arena_teams';
+  static const String tableArenaVotes = 'arena_votes';
+  static const String tableArenaSubmissions = 'arena_submissions';
+  static const String tableArenaBookmarks = 'arena_bookmarks';
   static const String bucketPostMedia = 'post-media';
+  static const String bucketNotesPdfs = 'notes-pdfs';
+  static const String bucketChatMedia = 'chat-media';
 }

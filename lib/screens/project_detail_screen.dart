@@ -9,6 +9,7 @@ import '../widgets/spring_button.dart';
 import '../widgets/morphing_capsule.dart';
 import '../widgets/expandable_text.dart';
 import '../widgets/full_screen_image_viewer.dart';
+import '../services/github_workspace_service.dart';
 import 'individual_chat_screen.dart';
 import 'chat_screen.dart';
 import 'user_profile_detail_screen.dart';
@@ -55,6 +56,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   bool _showDetailsSection = true; // Image 3 Project Overview & Features
   bool _isScreenshotsExpanded = true;
   bool _isRelatedExpanded = true;
+  Future<List<GitTreeEntry>>? _repositoryTree;
 
   late List<ProjectReviewItem> _reviews;
 
@@ -62,6 +64,18 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   void initState() {
     super.initState();
     _initReviews();
+    _refreshRepositoryTree();
+  }
+
+  void _refreshRepositoryTree() {
+    if (!widget.project.isGitHubProject) return;
+    setState(() {
+      _repositoryTree = GithubWorkspaceService.fetchTree(
+        owner: widget.project.gitOwner!,
+        repo: widget.project.gitRepoName!,
+        branch: widget.project.gitBranch ?? 'main',
+      );
+    });
   }
 
   void _initReviews() {
@@ -69,19 +83,23 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       ProjectReviewItem(
         id: 'r1',
         username: 'Alex Rivera',
-        avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
         rating: 5.0,
         timeAgo: '2 hours ago',
-        comment: 'Clean structure and outstanding responsive layouts! Easily integrated into my workflow.',
+        comment:
+            'Clean structure and outstanding responsive layouts! Easily integrated into my workflow.',
         likes: 14,
       ),
       ProjectReviewItem(
         id: 'r2',
         username: 'Elena Rostova',
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
         rating: 4.8,
         timeAgo: 'Yesterday',
-        comment: 'Great documentation. The state handling and widget breakdown made customizing it a breeze.',
+        comment:
+            'Great documentation. The state handling and widget breakdown made customizing it a breeze.',
         likes: 8,
       ),
     ];
@@ -120,7 +138,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               ),
               decoration: BoxDecoration(
                 color: const Color(0xFF09090B).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(28)),
                 border: Border.all(color: Colors.white.withOpacity(0.18)),
               ),
               child: Column(
@@ -130,7 +149,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     child: Container(
                       width: 40,
                       height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -139,24 +160,32 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     children: [
                       Row(
                         children: const [
-                          Icon(LucideIcons.messageSquareQuote, color: Color(0xFF54C5F8), size: 22),
+                          Icon(LucideIcons.messageSquareQuote,
+                              color: Color(0xFF54C5F8), size: 22),
                           SizedBox(width: 10),
                           Text(
                             'Project Review',
-                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                        icon: const Icon(LucideIcons.x,
+                            color: Colors.white70, size: 20),
                       ),
                     ],
                   ),
                   const SizedBox(height: 16),
                   Text(
                     'Rate this project',
-                    style: GoogleFonts.inter(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.inter(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -164,13 +193,16 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       final starValue = index + 1.0;
                       final isSelected = starValue <= selectedRating;
                       return GestureDetector(
-                        onTap: () => setModalState(() => selectedRating = starValue),
+                        onTap: () =>
+                            setModalState(() => selectedRating = starValue),
                         child: Padding(
                           padding: const EdgeInsets.only(right: 8.0),
                           child: Icon(
                             LucideIcons.star,
                             size: 28,
-                            color: isSelected ? const Color(0xFFFFD700) : Colors.white24,
+                            color: isSelected
+                                ? const Color(0xFFFFD700)
+                                : Colors.white24,
                           ),
                         ),
                       );
@@ -179,7 +211,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                   const SizedBox(height: 18),
                   Text(
                     'Your Feedback & Review',
-                    style: GoogleFonts.inter(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.inter(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   Expanded(
@@ -188,16 +223,21 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.06),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white.withOpacity(0.12)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
                       child: TextField(
                         controller: commentCtrl,
                         maxLines: null,
                         expands: true,
-                        style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.45),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 14, height: 1.45),
                         decoration: InputDecoration(
-                          hintText: 'Share your thoughts on the code architecture, responsiveness, and UI components...',
-                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 13.5),
+                          hintText:
+                              'Share your thoughts on the code architecture, responsiveness, and UI components...',
+                          hintStyle: TextStyle(
+                              color: Colors.white.withOpacity(0.35),
+                              fontSize: 13.5),
                           border: InputBorder.none,
                         ),
                       ),
@@ -214,7 +254,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                             ProjectReviewItem(
                               id: 'r_${DateTime.now().millisecondsSinceEpoch}',
                               username: 'You',
-                              avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+                              avatarUrl:
+                                  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
                               rating: selectedRating,
                               timeAgo: 'Just now',
                               comment: text,
@@ -235,7 +276,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
+                        gradient: const LinearGradient(
+                            colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
@@ -248,7 +290,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       alignment: Alignment.center,
                       child: const Text(
                         'Submit Review',
-                        style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700),
                       ),
                     ),
                   ),
@@ -268,8 +313,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       handle: 'sarah_chen',
       headline: 'Full-stack UI Architect · Design Systems Lead',
       roleBadge: 'Featured Creator',
-      avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200',
-      bannerUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
+      avatarUrl:
+          'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200',
+      bannerUrl:
+          'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
       isOnline: true,
       isFollowing: _isSnappedAuthor,
       followersCount: 2480,
@@ -281,7 +328,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       posts: [],
       media: [],
       projects: [],
-      bio: 'Crafting responsive design systems and open-source UI libraries. Passionate about micro-interactions and developer ergonomics.',
+      bio:
+          'Crafting responsive design systems and open-source UI libraries. Passionate about micro-interactions and developer ergonomics.',
       department: 'Design Engineering',
       location: 'San Francisco, CA',
     );
@@ -289,7 +337,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => UserProfileDetailScreen(user: authorProfile, isSelf: false),
+        builder: (_) =>
+            UserProfileDetailScreen(user: authorProfile, isSelf: false),
       ),
     );
   }
@@ -298,17 +347,20 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     final conversation = ChatConversation(
       id: 'chat_sarah_chen',
       name: 'Sarah Chen',
-      avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200',
+      avatarUrl:
+          'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200',
       role: 'UI Architect',
       isOnline: true,
       unreadCount: 0,
-      lastMessage: 'Hi! Let me know if you need help customizing the ${widget.project.title}!',
+      lastMessage:
+          'Hi! Let me know if you need help customizing the ${widget.project.title}!',
       time: '10:30 AM',
       messages: [
         ChatMessage(
           id: 'sc_1',
           time: '10:30 AM',
-          text: 'Hi! Let me know if you need help customizing the ${widget.project.title}!',
+          text:
+              'Hi! Let me know if you need help customizing the ${widget.project.title}!',
           // Sent from project details
           isMe: false,
         ),
@@ -355,7 +407,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               color: Colors.white.withOpacity(0.08),
               border: Border.all(color: Colors.white.withOpacity(0.12)),
             ),
-            child: const Icon(LucideIcons.chevronLeft, color: Colors.white, size: 20),
+            child: const Icon(LucideIcons.chevronLeft,
+                color: Colors.white, size: 20),
           ),
         ),
         title: Text(
@@ -373,7 +426,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               setState(() => _isSaved = !_isSaved);
               MorphingCapsule.show(
                 context,
-                icon: _isSaved ? LucideIcons.bookmarkCheck : LucideIcons.bookmarkMinus,
+                icon: _isSaved
+                    ? LucideIcons.bookmarkCheck
+                    : LucideIcons.bookmarkMinus,
                 label: _isSaved ? 'Project saved!' : 'Removed from Saved',
                 color: const Color(0xFFFFD700),
               );
@@ -410,7 +465,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                 color: Colors.white.withOpacity(0.08),
                 border: Border.all(color: Colors.white.withOpacity(0.12)),
               ),
-              child: const Icon(LucideIcons.share2, color: Colors.white, size: 18),
+              child:
+                  const Icon(LucideIcons.share2, color: Colors.white, size: 18),
             ),
           ),
           SpringButton(
@@ -423,7 +479,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                 color: Colors.white.withOpacity(0.08),
                 border: Border.all(color: Colors.white.withOpacity(0.12)),
               ),
-              child: const Icon(LucideIcons.ellipsis, color: Colors.white, size: 18),
+              child: const Icon(LucideIcons.ellipsis,
+                  color: Colors.white, size: 18),
             ),
           ),
         ],
@@ -446,9 +503,16 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               const SizedBox(height: 16),
             ],
 
+            if (widget.project.isGitHubProject) ...[
+              _buildRepositoryFilesCard(),
+              const SizedBox(height: 16),
+            ],
+
             // ─── 3. SCREENSHOTS & DEMO (Exact Image 2 Specification) ───
-            _buildScreenshotsSection(),
-            const SizedBox(height: 16),
+            if (!widget.project.isGitHubProject) ...[
+              _buildScreenshotsSection(),
+              const SizedBox(height: 16),
+            ],
 
             // ─── 4. AUTHOR ACCOUNT CARD (Snap & Message buttons) ───
             _buildAuthorAccountCard(),
@@ -467,6 +531,164 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   }
 
   // ─── Exact Image 2 Featured Card ───────────────────────────────────────────
+  Widget _buildRepositoryFilesCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF13151D),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(LucideIcons.folderGit2,
+                  color: Color(0xFF54C5F8), size: 19),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Repository Files',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Refresh live GitHub tree',
+                onPressed: _refreshRepositoryTree,
+                icon: const Icon(LucideIcons.refreshCw,
+                    color: Colors.white70, size: 17),
+              ),
+            ],
+          ),
+          Text(
+            '${widget.project.gitOwner}/${widget.project.gitRepoName} • ${widget.project.gitBranch ?? 'main'}',
+            style: GoogleFonts.inter(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          FutureBuilder<List<GitTreeEntry>>(
+            future: _repositoryTree,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const SizedBox(
+                  height: 170,
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF54C5F8),
+                    ),
+                  ),
+                );
+              }
+              if (snapshot.hasError) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A1217),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0x66F87171)),
+                  ),
+                  child: Text(
+                    snapshot.error.toString().replaceFirst('Bad state: ', ''),
+                    style: const TextStyle(
+                      color: Color(0xFFFCA5A5),
+                      fontSize: 12,
+                    ),
+                  ),
+                );
+              }
+              final entries = snapshot.data ?? const [];
+              return Container(
+                height: 300,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF09090B),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: entries.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Repository is empty',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      )
+                    : ListView.builder(
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: entries.length,
+                        itemBuilder: (context, index) {
+                          final entry = entries[index];
+                          final depth = '/'.allMatches(entry.path).length;
+                          return Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              12 + depth * 13.0,
+                              6,
+                              10,
+                              6,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  entry.isDirectory
+                                      ? LucideIcons.folder
+                                      : LucideIcons.fileCode,
+                                  size: 14,
+                                  color: entry.isDirectory
+                                      ? const Color(0xFFFBBF24)
+                                      : Colors.white54,
+                                ),
+                                const SizedBox(width: 7),
+                                Expanded(
+                                  child: Text(
+                                    entry.path.split('/').last,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                if (!entry.isDirectory && entry.size > 0)
+                                  Text(
+                                    '${(entry.size / 1024).toStringAsFixed(entry.size < 10240 ? 1 : 0)} KB',
+                                    style: const TextStyle(
+                                      color: Colors.white30,
+                                      fontSize: 10.5,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          const Row(
+            children: [
+              Icon(LucideIcons.info, color: Colors.white38, size: 14),
+              SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Load Project downloads the real GitHub source into Workspace. Supabase stores metadata only.',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFeaturedCard(Color diffColor) {
     return Container(
       decoration: BoxDecoration(
@@ -493,7 +715,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                 child: Image.network(
                   widget.project.thumbnailUrl,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(color: Colors.white12),
+                  errorBuilder: (_, __, ___) =>
+                      Container(color: Colors.white12),
                 ),
               ),
               // Featured Pill (Top-left)
@@ -505,11 +728,13 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.black.withOpacity(0.55),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.2)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -543,9 +768,11 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       decoration: BoxDecoration(
                         color: Colors.black.withOpacity(0.55),
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withOpacity(0.2)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.2)),
                       ),
-                      child: const Icon(LucideIcons.ellipsis, color: Colors.white, size: 16),
+                      child: const Icon(LucideIcons.ellipsis,
+                          color: Colors.white, size: 16),
                     ),
                   ),
                 ),
@@ -568,7 +795,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                         Container(
                           width: 8,
                           height: 8,
-                          decoration: BoxDecoration(color: diffColor, shape: BoxShape.circle),
+                          decoration: BoxDecoration(
+                              color: diffColor, shape: BoxShape.circle),
                         ),
                         const SizedBox(width: 7),
                         Text(
@@ -583,7 +811,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     ),
                     Row(
                       children: [
-                        const Icon(LucideIcons.clock, size: 14, color: Color(0xFF9E9EA4)),
+                        const Icon(LucideIcons.clock,
+                            size: 14, color: Color(0xFF9E9EA4)),
                         const SizedBox(width: 6),
                         Text(
                           widget.project.estimatedTime,
@@ -629,11 +858,13 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                   runSpacing: 6,
                   children: widget.project.techStack.map((tag) {
                     return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 5),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.07),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withOpacity(0.12)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
                       child: Text(
                         tag,
@@ -653,26 +884,34 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                   children: [
                     Expanded(
                       child: SpringButton(
-                        onTap: () => setState(() => _showDetailsSection = !_showDetailsSection),
+                        onTap: () => setState(
+                            () => _showDetailsSection = !_showDetailsSection),
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           decoration: BoxDecoration(
-                            color: _showDetailsSection ? Colors.white.withOpacity(0.12) : Colors.white.withOpacity(0.06),
+                            color: _showDetailsSection
+                                ? Colors.white.withOpacity(0.12)
+                                : Colors.white.withOpacity(0.06),
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: Colors.white.withOpacity(0.16)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.16)),
                           ),
                           alignment: Alignment.center,
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                _showDetailsSection ? LucideIcons.eyeOff : LucideIcons.eye,
+                                _showDetailsSection
+                                    ? LucideIcons.eyeOff
+                                    : LucideIcons.eye,
                                 size: 16,
                                 color: Colors.white,
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                _showDetailsSection ? 'Hide Details' : 'View Details',
+                                _showDetailsSection
+                                    ? 'Hide Details'
+                                    : 'View Details',
                                 style: GoogleFonts.inter(
                                   color: Colors.white,
                                   fontSize: 13,
@@ -689,9 +928,13 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       child: SpringButton(
                         onTap: () {
                           if (widget.onOpenInWorkspace != null) {
-                            widget.onOpenInWorkspace!(widget.project.id);
+                            final openWorkspace = widget.onOpenInWorkspace!;
+                            Navigator.of(context).pop();
+                            openWorkspace(widget.project.id);
                           } else {
-                            MorphingCapsule.show(context, icon: LucideIcons.checkCircle, label: 'Loaded project files to workspace');
+                            MorphingCapsule.show(context,
+                                icon: LucideIcons.checkCircle,
+                                label: 'Loaded project files to workspace');
                           }
                         },
                         child: Container(
@@ -699,13 +942,15 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.06),
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: Colors.white.withOpacity(0.16)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.16)),
                           ),
                           alignment: Alignment.center,
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(LucideIcons.arrowRight, size: 16, color: Colors.white),
+                              const Icon(LucideIcons.arrowRight,
+                                  size: 16, color: Colors.white),
                               const SizedBox(width: 8),
                               Text(
                                 'Load Project',
@@ -748,18 +993,25 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               SizedBox(width: 10),
               Text(
                 'Project Overview',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          _buildOverviewRow(LucideIcons.layoutGrid, 'Category', widget.project.category),
+          _buildOverviewRow(
+              LucideIcons.layoutGrid, 'Category', widget.project.category),
           const SizedBox(height: 12),
-          _buildOverviewRow(LucideIcons.barChart2, 'Difficulty', widget.project.difficulty),
+          _buildOverviewRow(
+              LucideIcons.barChart2, 'Difficulty', widget.project.difficulty),
           const SizedBox(height: 12),
-          _buildOverviewRow(LucideIcons.clock, 'Time Estimate', widget.project.estimatedTime),
+          _buildOverviewRow(
+              LucideIcons.clock, 'Time Estimate', widget.project.estimatedTime),
           const SizedBox(height: 12),
-          _buildOverviewRow(LucideIcons.layers, 'Technologies', widget.project.techStack.join(', ')),
+          _buildOverviewRow(LucideIcons.layers, 'Technologies',
+              widget.project.techStack.join(', ')),
         ],
       ),
     );
@@ -780,7 +1032,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
         Expanded(
           child: Text(
             value,
-            style: GoogleFonts.inter(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w600),
+            style: GoogleFonts.inter(
+                color: Colors.white,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -815,7 +1070,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               SizedBox(width: 10),
               Text(
                 'Features',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700),
               ),
             ],
           ),
@@ -826,7 +1084,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(LucideIcons.checkCircle2, color: Colors.white70, size: 18),
+                  const Icon(LucideIcons.checkCircle2,
+                      color: Colors.white70, size: 18),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -850,9 +1109,24 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   // ─── Exact Image 2 Screenshots & Demo Card ─────────────────────────────────
   Widget _buildScreenshotsSection() {
     final screenshots = [
-      {'title': 'Main Page', 'url': widget.project.thumbnailUrl, 'isVideo': false},
-      {'title': 'Cart View', 'url': 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=600', 'isVideo': false},
-      {'title': 'Demo Video', 'url': 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600', 'isVideo': true, 'duration': '0:32'},
+      {
+        'title': 'Main Page',
+        'url': widget.project.thumbnailUrl,
+        'isVideo': false
+      },
+      {
+        'title': 'Cart View',
+        'url':
+            'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=600',
+        'isVideo': false
+      },
+      {
+        'title': 'Demo Video',
+        'url':
+            'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600',
+        'isVideo': true,
+        'duration': '0:32'
+      },
     ];
 
     return Container(
@@ -866,7 +1140,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           GestureDetector(
-            onTap: () => setState(() => _isScreenshotsExpanded = !_isScreenshotsExpanded),
+            onTap: () => setState(
+                () => _isScreenshotsExpanded = !_isScreenshotsExpanded),
             behavior: HitTestBehavior.opaque,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -877,12 +1152,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     SizedBox(width: 10),
                     Text(
                       'Screenshots & Demo',
-                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
                 Icon(
-                  _isScreenshotsExpanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                  _isScreenshotsExpanded
+                      ? LucideIcons.chevronUp
+                      : LucideIcons.chevronDown,
                   color: Colors.white60,
                   size: 18,
                 ),
@@ -914,7 +1194,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.05),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white.withOpacity(0.12)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: Column(
@@ -927,7 +1208,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                 Image.network(
                                   item['url'] as String,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(color: Colors.white12),
+                                  errorBuilder: (_, __, ___) =>
+                                      Container(color: Colors.white12),
                                 ),
                                 if (isVideo)
                                   Center(
@@ -936,9 +1218,11 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                       decoration: BoxDecoration(
                                         color: Colors.black.withOpacity(0.6),
                                         shape: BoxShape.circle,
-                                        border: Border.all(color: Colors.white38),
+                                        border:
+                                            Border.all(color: Colors.white38),
                                       ),
-                                      child: const Icon(LucideIcons.play, color: Colors.white, size: 16),
+                                      child: const Icon(LucideIcons.play,
+                                          color: Colors.white, size: 16),
                                     ),
                                   ),
                                 if (isVideo && item['duration'] != null)
@@ -946,14 +1230,18 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                     bottom: 6,
                                     right: 6,
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: Colors.black.withOpacity(0.7),
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: Text(
                                         item['duration'] as String,
-                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold),
                                       ),
                                     ),
                                   ),
@@ -961,18 +1249,24 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                             ),
                           ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 8),
                             child: Row(
                               children: [
                                 Icon(
-                                  isVideo ? LucideIcons.video : LucideIcons.image,
+                                  isVideo
+                                      ? LucideIcons.video
+                                      : LucideIcons.image,
                                   size: 13,
                                   color: Colors.white60,
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
                                   item['title'] as String,
-                                  style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                                  style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600),
                                 ),
                               ],
                             ),
@@ -1005,12 +1299,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
           GestureDetector(
             onTap: () => FullScreenImageViewer.show(
               context,
-              imageUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=600',
+              imageUrl:
+                  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=600',
               title: 'Sarah Chen',
             ),
             child: const CircleAvatar(
               radius: 24,
-              backgroundImage: NetworkImage('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200'),
+              backgroundImage: NetworkImage(
+                  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200'),
             ),
           ),
           const SizedBox(width: 14),
@@ -1026,23 +1322,32 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     children: [
                       Text(
                         'Sarah Chen',
-                        style: GoogleFonts.inter(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w700),
+                        style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: const Color(0xFF54C5F8).withOpacity(0.18),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const Text('Author', style: TextStyle(color: Color(0xFF54C5F8), fontSize: 9.5, fontWeight: FontWeight.bold)),
+                        child: const Text('Author',
+                            style: TextStyle(
+                                color: Color(0xFF54C5F8),
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
                   const SizedBox(height: 2),
                   Text(
                     'Full-stack UI Architect',
-                    style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 12),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.55), fontSize: 12),
                   ),
                 ],
               ),
@@ -1054,18 +1359,24 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               setState(() => _isSnappedAuthor = !_isSnappedAuthor);
               MorphingCapsule.show(
                 context,
-                icon: _isSnappedAuthor ? LucideIcons.check : LucideIcons.userPlus,
+                icon:
+                    _isSnappedAuthor ? LucideIcons.check : LucideIcons.userPlus,
                 label: _isSnappedAuthor ? 'Snapping Sarah!' : 'Unsnapped',
-                color: _isSnappedAuthor ? const Color(0xFF54C5F8) : Colors.white70,
+                color:
+                    _isSnappedAuthor ? const Color(0xFF54C5F8) : Colors.white70,
               );
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: _isSnappedAuthor ? Colors.white.withOpacity(0.08) : const Color(0xFF54C5F8),
+                color: _isSnappedAuthor
+                    ? Colors.white.withOpacity(0.08)
+                    : const Color(0xFF54C5F8),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: _isSnappedAuthor ? Colors.white.withOpacity(0.18) : const Color(0xFF54C5F8),
+                  color: _isSnappedAuthor
+                      ? Colors.white.withOpacity(0.18)
+                      : const Color(0xFF54C5F8),
                 ),
               ),
               child: Text(
@@ -1089,7 +1400,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.white.withOpacity(0.16)),
               ),
-              child: const Icon(LucideIcons.messageSquare, color: Colors.white, size: 16),
+              child: const Icon(LucideIcons.messageSquare,
+                  color: Colors.white, size: 16),
             ),
           ),
         ],
@@ -1110,7 +1422,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           GestureDetector(
-            onTap: () => setState(() => _isRelatedExpanded = !_isRelatedExpanded),
+            onTap: () =>
+                setState(() => _isRelatedExpanded = !_isRelatedExpanded),
             behavior: HitTestBehavior.opaque,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1121,12 +1434,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     SizedBox(width: 10),
                     Text(
                       'Related Projects',
-                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
                 Icon(
-                  _isRelatedExpanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                  _isRelatedExpanded
+                      ? LucideIcons.chevronUp
+                      : LucideIcons.chevronDown,
                   color: Colors.white60,
                   size: 18,
                 ),
@@ -1163,7 +1481,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.04),
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: Colors.white.withOpacity(0.12)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: Column(
@@ -1175,7 +1494,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                               rel.thumbnailUrl,
                               width: double.infinity,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(color: Colors.white12),
+                              errorBuilder: (_, __, ___) =>
+                                  Container(color: Colors.white12),
                             ),
                           ),
                           Expanded(
@@ -1186,16 +1506,29 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
                                     children: [
                                       Row(
                                         children: [
-                                          Container(width: 6, height: 6, decoration: BoxDecoration(color: diffC, shape: BoxShape.circle)),
+                                          Container(
+                                              width: 6,
+                                              height: 6,
+                                              decoration: BoxDecoration(
+                                                  color: diffC,
+                                                  shape: BoxShape.circle)),
                                           const SizedBox(width: 5),
-                                          Text(rel.difficulty, style: TextStyle(color: diffC, fontSize: 10, fontWeight: FontWeight.bold)),
+                                          Text(rel.difficulty,
+                                              style: TextStyle(
+                                                  color: diffC,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold)),
                                         ],
                                       ),
-                                      Text(rel.estimatedTime, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                                      Text(rel.estimatedTime,
+                                          style: const TextStyle(
+                                              color: Colors.white54,
+                                              fontSize: 10)),
                                     ],
                                   ),
                                   const SizedBox(height: 6),
@@ -1203,26 +1536,42 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                     rel.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
                                     rel.description,
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11),
+                                    style: TextStyle(
+                                        color: Colors.white.withOpacity(0.55),
+                                        fontSize: 11),
                                   ),
                                   const Spacer(),
                                   Wrap(
                                     spacing: 4,
-                                    children: rel.techStack.take(3).map((t) => Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withOpacity(0.06),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(t, style: const TextStyle(color: Colors.white70, fontSize: 9)),
-                                    )).toList(),
+                                    children: rel.techStack
+                                        .take(3)
+                                        .map((t) => Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white
+                                                    .withOpacity(0.06),
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                              child: Text(t,
+                                                  style: const TextStyle(
+                                                      color: Colors.white70,
+                                                      fontSize: 9)),
+                                            ))
+                                        .toList(),
                                   ),
                                 ],
                               ),
@@ -1258,28 +1607,39 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
             children: [
               Row(
                 children: [
-                  const Icon(LucideIcons.star, color: Color(0xFFFFD700), size: 18),
+                  const Icon(LucideIcons.star,
+                      color: Color(0xFFFFD700), size: 18),
                   const SizedBox(width: 8),
                   Text(
                     'Community Reviews (${_reviews.length})',
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700),
                   ),
                 ],
               ),
               SpringButton(
                 onTap: _openReviewModal,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: const Color(0xFF54C5F8).withOpacity(0.15),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.4)),
+                    border: Border.all(
+                        color: const Color(0xFF54C5F8).withOpacity(0.4)),
                   ),
                   child: const Row(
                     children: [
-                      Icon(LucideIcons.plus, size: 13, color: Color(0xFF54C5F8)),
+                      Icon(LucideIcons.plus,
+                          size: 13, color: Color(0xFF54C5F8)),
                       SizedBox(width: 4),
-                      Text('Review', style: TextStyle(color: Color(0xFF54C5F8), fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text('Review',
+                          style: TextStyle(
+                              color: Color(0xFF54C5F8),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ),
@@ -1301,16 +1661,24 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                 children: [
                   Row(
                     children: [
-                      CircleAvatar(radius: 14, backgroundImage: NetworkImage(rev.avatarUrl)),
+                      CircleAvatar(
+                          radius: 14,
+                          backgroundImage: NetworkImage(rev.avatarUrl)),
                       const SizedBox(width: 8),
-                      Text(rev.username, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                      Text(rev.username,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold)),
                       const Spacer(),
                       Row(
                         children: List.generate(5, (sIdx) {
                           return Icon(
                             LucideIcons.star,
                             size: 12,
-                            color: sIdx < rev.rating ? const Color(0xFFFFD700) : Colors.white24,
+                            color: sIdx < rev.rating
+                                ? const Color(0xFFFFD700)
+                                : Colors.white24,
                           );
                         }),
                       ),
@@ -1320,7 +1688,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                   ExpandableText(
                     text: rev.comment,
                     maxLines: 4,
-                    style: const TextStyle(color: Color(0xFFD4D4D8), fontSize: 12.5, height: 1.4),
+                    style: const TextStyle(
+                        color: Color(0xFFD4D4D8), fontSize: 12.5, height: 1.4),
                   ),
                 ],
               ),

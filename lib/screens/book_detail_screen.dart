@@ -7,23 +7,62 @@ import '../utils/app_animations.dart';
 import '../widgets/spring_button.dart';
 import '../services/payment_service.dart';
 import '../widgets/morphing_capsule.dart';
-import '../widgets/expandable_text.dart';
-import '../services/browser_launcher.dart';
+import '../services/notes_service.dart';
+import 'pdf_reader_screen.dart';
 
 class BookDetailScreen extends StatefulWidget {
   final BookNote book;
   final String? heroTag;
   final VoidCallback? onBookmarkToggle;
+  final VoidCallback? onStarToggle;
 
   const BookDetailScreen({
     super.key,
     required this.book,
     this.heroTag,
     this.onBookmarkToggle,
+    this.onStarToggle,
   });
 
   @override
   State<BookDetailScreen> createState() => _BookDetailScreenState();
+}
+
+class _PaymentMethodChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _PaymentMethodChip({
+    required this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: const Color(0xFF54C5F8), size: 15),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _BookDetailScreenState extends State<BookDetailScreen>
@@ -32,6 +71,7 @@ class _BookDetailScreenState extends State<BookDetailScreen>
   late TabController _tabController;
   int _selectedTab = 0;
   bool _isDownloading = false;
+  bool _isStarring = false;
 
   @override
   void initState() {
@@ -43,6 +83,19 @@ class _BookDetailScreenState extends State<BookDetailScreen>
         setState(() => _selectedTab = _tabController.index);
       }
     });
+    _refreshPurchaseAccess();
+  }
+
+  Future<void> _refreshPurchaseAccess() async {
+    if (_book.isFree || !_book.hasRealPdf) {
+      return;
+    }
+    try {
+      await PaymentService.instance.refreshPurchases();
+      if (mounted) setState(() {});
+    } catch (error) {
+      debugPrint('Unable to refresh PDF purchase access: $error');
+    }
   }
 
   @override
@@ -68,14 +121,21 @@ class _BookDetailScreenState extends State<BookDetailScreen>
         content: Row(
           children: [
             Icon(
-              _book.isBookmarked ? LucideIcons.bookmarkCheck : LucideIcons.bookmarkMinus,
+              _book.isBookmarked
+                  ? LucideIcons.bookmarkCheck
+                  : LucideIcons.bookmarkMinus,
               color: Colors.white,
               size: 20,
             ),
             const SizedBox(width: 12),
             Text(
-              _book.isBookmarked ? 'Added to Saved Books' : 'Removed from Saved Books',
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              _book.isBookmarked
+                  ? 'Added to Saved Books'
+                  : 'Removed from Saved Books',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -84,9 +144,55 @@ class _BookDetailScreenState extends State<BookDetailScreen>
     );
   }
 
-  bool get _isUnlocked => _book.isFree || PaymentService.instance.isItemUnlocked(_book.id);
+  bool get _isUnlocked => NotesService.canAccessFullPdf(
+        isFree: _book.isFree,
+        hasCompletedPurchase: PaymentService.instance.isItemUnlocked(_book.id),
+      );
+
+  Future<void> _toggleStar() async {
+    if (_isStarring) return;
+    setState(() => _isStarring = true);
+    try {
+      final result = await NotesService.toggleStar(_book);
+      if (!mounted) return;
+      setState(() {
+        _book.isStarred = result.isStarred;
+        _book.starCount = result.starCount;
+      });
+      widget.onStarToggle?.call();
+    } catch (error) {
+      if (!mounted) return;
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.circleAlert,
+        label: error.toString().replaceFirst('Bad state: ', ''),
+        color: Colors.orange,
+      );
+    } finally {
+      if (mounted) setState(() => _isStarring = false);
+    }
+  }
 
   void _triggerReadNow() {
+    if (_book.hasRealPdf) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PdfReaderScreen(
+            book: _book,
+            fullDocument: _isUnlocked,
+            onUnlockRequested: _isUnlocked
+                ? null
+                : () {
+                    Navigator.of(context).pop();
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _showPaymentModal(context);
+                    });
+                  },
+          ),
+        ),
+      );
+      return;
+    }
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -101,8 +207,13 @@ class _BookDetailScreenState extends State<BookDetailScreen>
       return;
     }
     setState(() => _isDownloading = true);
-    await Future.delayed(const Duration(milliseconds: 1200));
-    if (mounted) {
+    try {
+      if (_book.hasRealPdf) {
+        await NotesService.downloadPdf(_book);
+      } else {
+        await Future.delayed(const Duration(milliseconds: 1200));
+      }
+      if (!mounted) return;
       setState(() => _isDownloading = false);
       MorphingCapsule.show(
         context,
@@ -110,12 +221,21 @@ class _BookDetailScreenState extends State<BookDetailScreen>
         label: '${_book.title} downloaded to internal storage!',
         color: const Color(0xFF10B981),
       );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _isDownloading = false);
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.cloudOff,
+        label: 'Download failed: $error',
+        color: Colors.orange,
+      );
     }
   }
 
   void _showPaymentModal(BuildContext context, {bool forDownload = false}) {
-    String selectedMethod = 'Apple Pay';
     bool isProcessing = false;
+    bool checkoutStarted = false;
 
     showModalBottomSheet(
       context: context,
@@ -129,7 +249,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
               padding: const EdgeInsets.fromLTRB(22, 16, 22, 32),
               decoration: BoxDecoration(
                 color: const Color(0xFF0C0E17).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(28)),
                 border: Border.all(color: Colors.white.withOpacity(0.18)),
               ),
               child: Column(
@@ -140,7 +261,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                     child: Container(
                       width: 40,
                       height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -149,17 +272,22 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                     children: [
                       Row(
                         children: const [
-                          Icon(LucideIcons.creditCard, color: Color(0xFF54C5F8), size: 20),
+                          Icon(LucideIcons.creditCard,
+                              color: Color(0xFF54C5F8), size: 20),
                           SizedBox(width: 10),
                           Text(
                             'Unlock Full Document',
-                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(modalCtx),
-                        icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                        icon: const Icon(LucideIcons.x,
+                            color: Colors.white70, size: 20),
                       ),
                     ],
                   ),
@@ -167,17 +295,20 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                   Text(
                     forDownload
                         ? 'Payment Required: Unlock all ${_book.pages} pages to enable offline download.'
-                        : 'Unlock 100% of ${_book.pages} pages (currently previewing first 5% only).',
-                    style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 13, height: 1.4),
+                        : 'Unlock 100% of ${_book.pages} pages (the first 20% are readable before payment).',
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.65),
+                        fontSize: 13,
+                        height: 1.4),
                   ),
                   const SizedBox(height: 16),
-
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: const Color(0xFF54C5F8).withOpacity(0.12),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+                      border: Border.all(
+                          color: const Color(0xFF54C5F8).withOpacity(0.35)),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -186,77 +317,116 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(_book.title, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(_book.title,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
                               const SizedBox(height: 2),
-                              Text('${_book.pages} Pages PDF • Lifetime Access', style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 11.5)),
+                              Text('${_book.pages} Pages PDF • Lifetime Access',
+                                  style: const TextStyle(
+                                      color: Color(0xFF54C5F8),
+                                      fontSize: 11.5)),
                             ],
                           ),
                         ),
                         Text(
                           _book.price,
-                          style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 18),
-
-                  const Text('Select Payment Method', style: TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.bold)),
+                  const Text('Secure checkout supports',
+                      style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
-                  ...['Apple Pay', 'Google Pay', 'Credit Card (•••• 4242)', 'UPI / Instant Pay'].map((method) {
-                    final isSel = selectedMethod == method;
-                    return GestureDetector(
-                      onTap: () => setModalState(() => selectedMethod = method),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: isSel ? const Color(0xFF54C5F8).withOpacity(0.15) : Colors.white.withOpacity(0.04),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: isSel ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.1)),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(method, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontSize: 13.5, fontWeight: isSel ? FontWeight.bold : FontWeight.w500)),
-                            Icon(isSel ? LucideIcons.checkCircle2 : LucideIcons.circle, color: isSel ? const Color(0xFF54C5F8) : Colors.white30, size: 18),
-                          ],
-                        ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: const [
+                      _PaymentMethodChip(
+                        icon: LucideIcons.creditCard,
+                        label: 'Credit / Debit Card',
                       ),
-                    );
-                  }),
+                      _PaymentMethodChip(
+                        icon: LucideIcons.smartphone,
+                        label: 'Apple Pay / Google Pay',
+                      ),
+                      _PaymentMethodChip(
+                        icon: LucideIcons.landmark,
+                        label: 'UPI when enabled',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Stripe shows the payment methods available for your device and account. Access is granted only after webhook confirmation.',
+                    style: TextStyle(
+                        color: Colors.white54, fontSize: 11.5, height: 1.4),
+                  ),
                   const SizedBox(height: 16),
-
                   SpringButton(
                     onTap: isProcessing
                         ? () {}
                         : () async {
                             setModalState(() => isProcessing = true);
-                            await PaymentService.instance.processPayment(
-                              itemId: _book.id,
-                              itemTitle: _book.title,
-                              amount: double.tryParse(_book.price.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 4.99,
-                              method: selectedMethod,
-                            );
-                            if (mounted) {
+                            try {
+                              if (!checkoutStarted) {
+                                final result = await PaymentService.instance
+                                    .startCheckout(itemId: _book.id);
+                                checkoutStarted = result.checkoutOpened;
+                              }
+                              final unlocked = await PaymentService.instance
+                                  .waitForCompletedPurchase(_book.id);
+                              if (!mounted || !modalCtx.mounted) return;
+                              setModalState(() => isProcessing = false);
+                              if (!unlocked) {
+                                MorphingCapsule.show(
+                                  context,
+                                  icon: LucideIcons.clock3,
+                                  label:
+                                      'Payment is not confirmed yet. Complete checkout, then check again.',
+                                  color: Colors.orange,
+                                );
+                                return;
+                              }
                               setState(() {});
                               Navigator.pop(modalCtx);
                               MorphingCapsule.show(
                                 context,
                                 icon: LucideIcons.checkCheck,
-                                label: 'Unlocked! Full document ready',
+                                label: 'Payment confirmed — full PDF unlocked',
                                 color: const Color(0xFF10B981),
                               );
-                              if (forDownload) {
-                                _triggerDownload();
-                              }
+                              if (forDownload) _triggerDownload();
+                            } catch (error) {
+                              if (!mounted || !modalCtx.mounted) return;
+                              setModalState(() => isProcessing = false);
+                              MorphingCapsule.show(
+                                context,
+                                icon: LucideIcons.circleAlert,
+                                label: error
+                                    .toString()
+                                    .replaceFirst('Exception: ', ''),
+                                color: Colors.orange,
+                              );
                             }
                           },
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
+                        gradient: const LinearGradient(
+                            colors: [Color(0xFF54C5F8), Color(0xFF2563EB)]),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
@@ -268,10 +438,19 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                       ),
                       alignment: Alignment.center,
                       child: isProcessing
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2))
                           : Text(
-                              'Pay ${_book.price} & Unlock Full Document',
-                              style: const TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.bold),
+                              checkoutStarted
+                                  ? 'Check Payment Status'
+                                  : 'Continue to Stripe • ${_book.price}',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.bold),
                             ),
                     ),
                   ),
@@ -286,9 +465,6 @@ class _BookDetailScreenState extends State<BookDetailScreen>
 
   @override
   Widget build(BuildContext context) {
-    final allBooks = BookNoteData.getAllBooks();
-    final suggestions = allBooks.where((b) => b.id != _book.id).toList();
-
     return Scaffold(
       backgroundColor: const Color(0xFF09090B),
       body: Stack(
@@ -355,8 +531,6 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                         _buildSegmentedTabHeader(),
                         const SizedBox(height: 20),
                         _buildTabContent(),
-                        const SizedBox(height: 36),
-                        _buildDownSuggestionsSection(suggestions),
                         const SizedBox(height: 60),
                       ],
                     ),
@@ -391,7 +565,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: const Color(0x33FFFFFF)),
                 ),
-                child: const Icon(LucideIcons.arrowLeft, color: Colors.white, size: 20),
+                child: const Icon(LucideIcons.arrowLeft,
+                    color: Colors.white, size: 20),
               ),
             ),
           ),
@@ -421,7 +596,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                     ),
                   ),
                   child: Icon(
-                    _book.isBookmarked ? LucideIcons.bookmarkCheck : LucideIcons.bookmark,
+                    _book.isBookmarked
+                        ? LucideIcons.bookmarkCheck
+                        : LucideIcons.bookmark,
                     color: Colors.white,
                     size: 19,
                   ),
@@ -453,7 +630,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: const Color(0x33FFFFFF)),
                   ),
-                  child: const Icon(LucideIcons.share2, color: Colors.white, size: 19),
+                  child: const Icon(LucideIcons.share2,
+                      color: Colors.white, size: 19),
                 ),
               ),
             ),
@@ -517,11 +695,13 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
                             decoration: BoxDecoration(
                               color: const Color(0x33FFFFFF),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0x26FFFFFF)),
+                              border:
+                                  Border.all(color: const Color(0x26FFFFFF)),
                             ),
                             child: Text(
                               _book.category.toUpperCase(),
@@ -533,7 +713,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                               ),
                             ),
                           ),
-                          Icon(_book.categoryIcon, color: Colors.white70, size: 16),
+                          Icon(_book.categoryIcon,
+                              color: Colors.white70, size: 16),
                         ],
                       ),
                       const Spacer(),
@@ -559,7 +740,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      if (_book.coverImageUrl == null && _book.coverCodeSnippet.trim().isNotEmpty) ...[
+                      if (_book.coverImageUrl == null &&
+                          _book.coverCodeSnippet.trim().isNotEmpty) ...[
                         const SizedBox(height: 10),
                         Container(
                           padding: const EdgeInsets.all(6),
@@ -603,7 +785,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: const Color(0x33FFFFFF),
                       borderRadius: BorderRadius.circular(8),
@@ -640,34 +823,47 @@ class _BookDetailScreenState extends State<BookDetailScreen>
             ),
             const Spacer(),
             // Rating pill in liquid glass
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0x1FFFFFFF),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0x33FFFFFF)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(LucideIcons.star, color: Colors.white, size: 14),
-                  const SizedBox(width: 5),
-                  Text(
-                    _book.rating.toStringAsFixed(1),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
+            GestureDetector(
+              onTap: _toggleStar,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0x1FFFFFFF),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0x33FFFFFF)),
+                ),
+                child: Row(
+                  children: [
+                    if (_isStarring)
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: Color(0xFFFFC857),
+                        ),
+                      )
+                    else
+                      Icon(
+                        LucideIcons.star,
+                        color: _book.isStarred
+                            ? const Color(0xFFFFC857)
+                            : Colors.white,
+                        size: 14,
+                      ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '${_book.starCount}',
+                      style: TextStyle(
+                        color: _book.isStarred
+                            ? const Color(0xFFFFC857)
+                            : Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '(${_book.reviewCount})',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.5),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -711,7 +907,10 @@ class _BookDetailScreenState extends State<BookDetailScreen>
               alignment: Alignment.center,
               child: Text(
                 _book.author.isNotEmpty ? _book.author[0] : 'A',
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(width: 8),
@@ -760,7 +959,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
     );
   }
 
-  Widget _buildMetricItem(IconData icon, String value, String label, {bool highlight = false}) {
+  Widget _buildMetricItem(IconData icon, String value, String label,
+      {bool highlight = false}) {
     return Column(
       children: [
         Icon(
@@ -800,6 +1000,7 @@ class _BookDetailScreenState extends State<BookDetailScreen>
 
   // ── Action Buttons ─────────────────────────────────────────────────────────
   Widget _buildActionButtonsBar() {
+    final isLockedPaid = !_isUnlocked && !_book.isFree;
     return Row(
       children: [
         // Read Now Button in Liquid Glass
@@ -825,14 +1026,15 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                       ),
                     ],
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(LucideIcons.bookOpen, color: Colors.white, size: 19),
-                      SizedBox(width: 8),
+                      const Icon(LucideIcons.bookOpen,
+                          color: Colors.white, size: 19),
+                      const SizedBox(width: 8),
                       Text(
-                        'Read Notes Now',
-                        style: TextStyle(
+                        isLockedPaid ? 'Read 20% Preview' : 'Read Notes Now',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
@@ -851,7 +1053,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
         Expanded(
           flex: 2,
           child: SpringButton(
-            onTap: _triggerDownload,
+            onTap: isLockedPaid
+                ? () => _showPaymentModal(context)
+                : _triggerDownload,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: BackdropFilter(
@@ -872,18 +1076,32 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                           height: 16,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
                           ),
                         )
                       else ...[
-                        const Icon(LucideIcons.download, color: Colors.white, size: 17),
+                        Icon(
+                          isLockedPaid
+                              ? LucideIcons.creditCard
+                              : LucideIcons.download,
+                          color: Colors.white,
+                          size: 17,
+                        ),
                         const SizedBox(width: 6),
-                        const Text(
-                          'Offline',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              isLockedPaid
+                                  ? 'Unlock ${_book.price}'
+                                  : 'Offline',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -900,7 +1118,11 @@ class _BookDetailScreenState extends State<BookDetailScreen>
 
   // ── Segmented Tab Header ───────────────────────────────────────────────────
   Widget _buildSegmentedTabHeader() {
-    final tabs = ['Overview', 'Full Review', 'Chapters (${_book.chapters.length})'];
+    final tabs = [
+      'Overview',
+      'Full Review',
+      'Chapters (${_book.chapters.length})'
+    ];
     return Container(
       height: 44,
       padding: const EdgeInsets.all(4),
@@ -922,9 +1144,12 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                 duration: AppAnimations.quick,
                 curve: AppAnimations.snappy,
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0x38FFFFFF) : Colors.transparent,
+                  color:
+                      isSelected ? const Color(0x38FFFFFF) : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
-                  border: isSelected ? Border.all(color: const Color(0x33FFFFFF)) : null,
+                  border: isSelected
+                      ? Border.all(color: const Color(0x33FFFFFF))
+                      : null,
                 ),
                 alignment: Alignment.center,
                 child: Text(
@@ -1008,7 +1233,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                     shape: BoxShape.circle,
                     border: Border.all(color: const Color(0x4DFFFFFF)),
                   ),
-                  child: const Icon(LucideIcons.check, color: Colors.white, size: 11),
+                  child: const Icon(LucideIcons.check,
+                      color: Colors.white, size: 11),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -1047,7 +1273,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
             children: [
               Row(
                 children: [
-                  const Icon(LucideIcons.sparkles, color: Colors.white, size: 17),
+                  const Icon(LucideIcons.sparkles,
+                      color: Colors.white, size: 17),
                   const SizedBox(width: 8),
                   Text(
                     'CodeSnap Editorial Verdict',
@@ -1059,7 +1286,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                   ),
                   const Spacer(),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: const Color(0x26FFFFFF),
                       borderRadius: BorderRadius.circular(6),
@@ -1261,175 +1489,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
     );
   }
 
-  // ── "Down Suggestions" (You Might Also Like) ───────────────────────────────
-  Widget _buildDownSuggestionsSection(List<BookNote> suggestions) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                const Icon(LucideIcons.sparkle, color: Colors.white, size: 16),
-                const SizedBox(width: 8),
-                Text(
-                  'Down Suggestions & Related Notes',
-                  style: GoogleFonts.inter(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-            const Text(
-              'Swipe >',
-              style: TextStyle(color: Color(0x80FFFFFF), fontSize: 12),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          height: 200,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            itemCount: suggestions.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 14),
-            itemBuilder: (context, index) {
-              final sugBook = suggestions[index];
-              return SpringButton(
-                onTap: () {
-                  Navigator.of(context).pushReplacement(
-                    PageRouteBuilder(
-                      transitionDuration: AppAnimations.expressive,
-                      pageBuilder: (_, __, ___) => BookDetailScreen(book: sugBook),
-                      transitionsBuilder: (_, animation, __, child) {
-                        return FadeTransition(
-                          opacity: animation,
-                          child: child,
-                        );
-                      },
-                    ),
-                  );
-                },
-                child: Container(
-                  width: 135,
-                  decoration: BoxDecoration(
-                    color: const Color(0x14FFFFFF),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0x26FFFFFF)),
-                  ),
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Mini Cover Art in smoked glass
-                      Container(
-                        height: 95,
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              sugBook.primaryColor,
-                              sugBook.secondaryColor,
-                            ],
-                          ),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        padding: const EdgeInsets.all(6),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              sugBook.category.toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 8,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              sugBook.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        sugBook.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        sugBook.author,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0x80FFFFFF),
-                          fontSize: 9.5,
-                        ),
-                      ),
-                      const Spacer(),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(LucideIcons.star, color: Colors.white, size: 10),
-                              const SizedBox(width: 3),
-                              Text(
-                                '${sugBook.rating}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Text(
-                            sugBook.price,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
   // ── In-App Document & Reader Modal ──────────────────────────────────────
   Widget _buildReadingReaderSheet(BuildContext ctx) {
-    final previewPages = (_book.pages * 0.05).ceil().clamp(1, _book.pages);
+    final previewPages = _book.previewPages;
     int currentPage = 1;
     bool isPaperMode = false;
 
@@ -1462,7 +1524,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
 
               // Reader Top Bar
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                 child: Row(
                   children: [
                     Container(
@@ -1471,7 +1534,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                         color: const Color(0xFF54C5F8).withOpacity(0.16),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(LucideIcons.fileText, color: Color(0xFF54C5F8), size: 16),
+                      child: const Icon(LucideIcons.fileText,
+                          color: Color(0xFF54C5F8), size: 16),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -1489,9 +1553,11 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                             ),
                           ),
                           Text(
-                            'Page $currentPage of ${_book.pages} • ${isUnlocked ? "Full Document Unlocked" : "5% Preview Mode"}',
+                            'Page $currentPage of ${_book.pages} • ${isUnlocked ? "Full Document Unlocked" : "20% Preview Mode"}',
                             style: TextStyle(
-                              color: isUnlocked ? const Color(0xFF10B981) : const Color(0xFF54C5F8),
+                              color: isUnlocked
+                                  ? const Color(0xFF10B981)
+                                  : const Color(0xFF54C5F8),
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1501,8 +1567,11 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                     ),
                     // Paper / Dark mode toggle
                     IconButton(
-                      tooltip: isPaperMode ? 'Switch to Dark Mode' : 'Switch to Paper Mode',
-                      onPressed: () => setReaderState(() => isPaperMode = !isPaperMode),
+                      tooltip: isPaperMode
+                          ? 'Switch to Dark Mode'
+                          : 'Switch to Paper Mode',
+                      onPressed: () =>
+                          setReaderState(() => isPaperMode = !isPaperMode),
                       icon: Icon(
                         isPaperMode ? LucideIcons.moon : LucideIcons.sun,
                         color: Colors.white70,
@@ -1511,7 +1580,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                     ),
                     IconButton(
                       onPressed: () => Navigator.of(ctx).pop(),
-                      icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                      icon: const Icon(LucideIcons.x,
+                          color: Colors.white70, size: 20),
                     ),
                   ],
                 ),
@@ -1520,7 +1590,8 @@ class _BookDetailScreenState extends State<BookDetailScreen>
 
               // Page Navigation Controls Bar
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 color: Colors.white.withOpacity(0.02),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1533,19 +1604,28 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                         }
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: currentPage > 1 ? Colors.white.withOpacity(0.08) : Colors.transparent,
+                          color: currentPage > 1
+                              ? Colors.white.withOpacity(0.08)
+                              : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
                           children: [
-                            Icon(LucideIcons.chevronLeft, size: 14, color: currentPage > 1 ? Colors.white : Colors.white24),
+                            Icon(LucideIcons.chevronLeft,
+                                size: 14,
+                                color: currentPage > 1
+                                    ? Colors.white
+                                    : Colors.white24),
                             const SizedBox(width: 4),
                             Text(
                               'Prev',
                               style: TextStyle(
-                                color: currentPage > 1 ? Colors.white : Colors.white24,
+                                color: currentPage > 1
+                                    ? Colors.white
+                                    : Colors.white24,
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1565,22 +1645,30 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                           children: List.generate(_book.pages, (index) {
                             final pageNum = index + 1;
                             final isCur = pageNum == currentPage;
-                            final isLockedChip = !isUnlocked && pageNum > previewPages;
+                            final isLockedChip =
+                                !isUnlocked && pageNum > previewPages;
 
                             return GestureDetector(
-                              onTap: () => setReaderState(() => currentPage = pageNum),
+                              onTap: () =>
+                                  setReaderState(() => currentPage = pageNum),
                               child: Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 3),
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 3),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 5),
                                 decoration: BoxDecoration(
                                   color: isCur
                                       ? const Color(0xFF54C5F8)
-                                      : (isLockedChip ? Colors.white.withOpacity(0.03) : Colors.white.withOpacity(0.08)),
+                                      : (isLockedChip
+                                          ? Colors.white.withOpacity(0.03)
+                                          : Colors.white.withOpacity(0.08)),
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
                                     color: isCur
                                         ? const Color(0xFF54C5F8)
-                                        : (isLockedChip ? Colors.white10 : Colors.white24),
+                                        : (isLockedChip
+                                            ? Colors.white10
+                                            : Colors.white24),
                                     width: 1,
                                   ),
                                 ),
@@ -1588,15 +1676,25 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     if (isLockedChip) ...[
-                                      Icon(LucideIcons.lock, size: 9, color: isCur ? Colors.black : Colors.white38),
+                                      Icon(LucideIcons.lock,
+                                          size: 9,
+                                          color: isCur
+                                              ? Colors.black
+                                              : Colors.white38),
                                       const SizedBox(width: 3),
                                     ],
                                     Text(
                                       'p.$pageNum',
                                       style: TextStyle(
-                                        color: isCur ? Colors.black : (isLockedChip ? Colors.white38 : Colors.white70),
+                                        color: isCur
+                                            ? Colors.black
+                                            : (isLockedChip
+                                                ? Colors.white38
+                                                : Colors.white70),
                                         fontSize: 10.5,
-                                        fontWeight: isCur ? FontWeight.w800 : FontWeight.w500,
+                                        fontWeight: isCur
+                                            ? FontWeight.w800
+                                            : FontWeight.w500,
                                       ),
                                     ),
                                   ],
@@ -1616,9 +1714,12 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                         }
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: currentPage < _book.pages ? Colors.white.withOpacity(0.08) : Colors.transparent,
+                          color: currentPage < _book.pages
+                              ? Colors.white.withOpacity(0.08)
+                              : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
@@ -1626,13 +1727,19 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                             Text(
                               'Next',
                               style: TextStyle(
-                                color: currentPage < _book.pages ? Colors.white : Colors.white24,
+                                color: currentPage < _book.pages
+                                    ? Colors.white
+                                    : Colors.white24,
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                             const SizedBox(width: 4),
-                            Icon(LucideIcons.chevronRight, size: 14, color: currentPage < _book.pages ? Colors.white : Colors.white24),
+                            Icon(LucideIcons.chevronRight,
+                                size: 14,
+                                color: currentPage < _book.pages
+                                    ? Colors.white
+                                    : Colors.white24),
                           ],
                         ),
                       ),
@@ -1653,10 +1760,14 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                         width: double.infinity,
                         padding: const EdgeInsets.all(24),
                         decoration: BoxDecoration(
-                          color: isPaperMode ? const Color(0xFFF9F7F1) : const Color(0xFF161822),
+                          color: isPaperMode
+                              ? const Color(0xFFF9F7F1)
+                              : const Color(0xFF161822),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: isPaperMode ? const Color(0xFFE5DEC9) : Colors.white.withOpacity(0.12),
+                            color: isPaperMode
+                                ? const Color(0xFFE5DEC9)
+                                : Colors.white.withOpacity(0.12),
                           ),
                           boxShadow: [
                             BoxShadow(
@@ -1676,17 +1787,23 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
                                     child: ImageFiltered(
-                                      imageFilter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                      imageFilter: ImageFilter.blur(
+                                          sigmaX: 8, sigmaY: 8),
                                       child: Container(
                                         padding: const EdgeInsets.all(16),
-                                        color: isPaperMode ? Colors.black.withOpacity(0.04) : Colors.white.withOpacity(0.03),
+                                        color: isPaperMode
+                                            ? Colors.black.withOpacity(0.04)
+                                            : Colors.white.withOpacity(0.03),
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               'Section $currentPage: In-Depth Architecture & Production Guide',
                                               style: GoogleFonts.inter(
-                                                color: isPaperMode ? Colors.black87 : Colors.white70,
+                                                color: isPaperMode
+                                                    ? Colors.black87
+                                                    : Colors.white70,
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.bold,
                                               ),
@@ -1695,7 +1812,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                             Text(
                                               'In this section we cover end-to-end multi-tier architectural implementations, state serialization pipelines, and reactive client-server communication channels.\n\nCode samples, schemas, diagrams, performance benchmarks, and automated test runners for large scale enterprise solutions.\n\nComprehensive review of optimization tradeoffs, memory allocation safety, and runtime fault tolerance protocols.',
                                               style: GoogleFonts.inter(
-                                                color: isPaperMode ? Colors.black54 : Colors.white54,
+                                                color: isPaperMode
+                                                    ? Colors.black54
+                                                    : Colors.white54,
                                                 fontSize: 12,
                                                 height: 1.6,
                                               ),
@@ -1710,26 +1829,34 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      color: const Color(0xFF54C5F8).withOpacity(0.14),
-                                      border: Border.all(color: const Color(0xFF54C5F8), width: 1.5),
+                                      color: const Color(0xFF54C5F8)
+                                          .withOpacity(0.14),
+                                      border: Border.all(
+                                          color: const Color(0xFF54C5F8),
+                                          width: 1.5),
                                     ),
-                                    child: const Icon(LucideIcons.lock, color: Color(0xFF54C5F8), size: 30),
+                                    child: const Icon(LucideIcons.lock,
+                                        color: Color(0xFF54C5F8), size: 30),
                                   ),
                                   const SizedBox(height: 14),
                                   Text(
                                     'Page $currentPage is Locked',
                                     style: GoogleFonts.inter(
-                                      color: isPaperMode ? Colors.black : Colors.white,
+                                      color: isPaperMode
+                                          ? Colors.black
+                                          : Colors.white,
                                       fontSize: 17,
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    'This is a paid document. The free preview covers the first 5% (Pages 1–$previewPages).\nUnlock all ${_book.pages} pages to read the entire document inside the app.',
+                                    'This is a paid document. The free preview covers the first 20% (Pages 1–$previewPages).\nUnlock all ${_book.pages} pages to read the entire document inside the app.',
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
-                                      color: isPaperMode ? Colors.black54 : Colors.white60,
+                                      color: isPaperMode
+                                          ? Colors.black54
+                                          : Colors.white60,
                                       fontSize: 12.5,
                                       height: 1.45,
                                     ),
@@ -1743,13 +1870,19 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: const Color(0xFF54C5F8),
                                       foregroundColor: Colors.black,
-                                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 22, vertical: 12),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(12)),
                                     ),
-                                    icon: const Icon(LucideIcons.shoppingBag, size: 16),
+                                    icon: const Icon(LucideIcons.shoppingBag,
+                                        size: 16),
                                     label: Text(
                                       'Unlock Document for ${_book.price}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13.5),
                                     ),
                                   ),
                                 ],
@@ -1760,27 +1893,36 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                 children: [
                                   // Page Header
                                   Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(
                                         _book.category.toUpperCase(),
                                         style: TextStyle(
-                                          color: isPaperMode ? const Color(0xFF2563EB) : const Color(0xFF54C5F8),
+                                          color: isPaperMode
+                                              ? const Color(0xFF2563EB)
+                                              : const Color(0xFF54C5F8),
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold,
                                           letterSpacing: 1,
                                         ),
                                       ),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
-                                          color: isPaperMode ? Colors.black.withOpacity(0.06) : Colors.white.withOpacity(0.08),
-                                          borderRadius: BorderRadius.circular(6),
+                                          color: isPaperMode
+                                              ? Colors.black.withOpacity(0.06)
+                                              : Colors.white.withOpacity(0.08),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
                                         ),
                                         child: Text(
                                           'PAGE $currentPage OF ${_book.pages}',
                                           style: TextStyle(
-                                            color: isPaperMode ? Colors.black87 : Colors.white70,
+                                            color: isPaperMode
+                                                ? Colors.black87
+                                                : Colors.white70,
                                             fontSize: 9.5,
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -1789,7 +1931,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     ],
                                   ),
                                   Divider(
-                                    color: isPaperMode ? Colors.black12 : Colors.white12,
+                                    color: isPaperMode
+                                        ? Colors.black12
+                                        : Colors.white12,
                                     height: 24,
                                   ),
 
@@ -1798,7 +1942,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     Text(
                                       _book.title,
                                       style: GoogleFonts.inter(
-                                        color: isPaperMode ? Colors.black : Colors.white,
+                                        color: isPaperMode
+                                            ? Colors.black
+                                            : Colors.white,
                                         fontSize: 20,
                                         fontWeight: FontWeight.w800,
                                         height: 1.25,
@@ -1808,7 +1954,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     Text(
                                       'By ${_book.author} • Difficulty: ${_book.difficulty} • Read Time: ${_book.readTime}',
                                       style: TextStyle(
-                                        color: isPaperMode ? Colors.black54 : Colors.white60,
+                                        color: isPaperMode
+                                            ? Colors.black54
+                                            : Colors.white60,
                                         fontSize: 12,
                                       ),
                                     ),
@@ -1816,7 +1964,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     Text(
                                       'Document Overview & Abstract',
                                       style: GoogleFonts.inter(
-                                        color: isPaperMode ? Colors.black87 : Colors.white,
+                                        color: isPaperMode
+                                            ? Colors.black87
+                                            : Colors.white,
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -1825,7 +1975,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     Text(
                                       _book.description,
                                       style: GoogleFonts.inter(
-                                        color: isPaperMode ? const Color(0xFF2C2C2C) : const Color(0xDEFFFFFF),
+                                        color: isPaperMode
+                                            ? const Color(0xFF2C2C2C)
+                                            : const Color(0xDEFFFFFF),
                                         fontSize: 13,
                                         height: 1.6,
                                       ),
@@ -1834,7 +1986,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     Text(
                                       'Core Key Takeaways',
                                       style: GoogleFonts.inter(
-                                        color: isPaperMode ? Colors.black87 : Colors.white,
+                                        color: isPaperMode
+                                            ? Colors.black87
+                                            : Colors.white,
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -1842,16 +1996,25 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     const SizedBox(height: 8),
                                     ..._book.keyTakeaways.map(
                                       (t) => Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 3),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 3),
                                         child: Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
-                                            Text('• ', style: TextStyle(color: isPaperMode ? Colors.black87 : Colors.white, fontSize: 14)),
+                                            Text('• ',
+                                                style: TextStyle(
+                                                    color: isPaperMode
+                                                        ? Colors.black87
+                                                        : Colors.white,
+                                                    fontSize: 14)),
                                             Expanded(
                                               child: Text(
                                                 t,
                                                 style: GoogleFonts.inter(
-                                                  color: isPaperMode ? const Color(0xFF2C2C2C) : const Color(0xDEFFFFFF),
+                                                  color: isPaperMode
+                                                      ? const Color(0xFF2C2C2C)
+                                                      : const Color(0xDEFFFFFF),
                                                   fontSize: 12.5,
                                                   height: 1.45,
                                                 ),
@@ -1866,19 +2029,27 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                     Builder(
                                       builder: (_) {
                                         final chapterIdx = currentPage - 2;
-                                        final hasChapter = chapterIdx >= 0 && chapterIdx < _book.chapters.length;
-                                        final chapter = hasChapter ? _book.chapters[chapterIdx] : null;
-                                        final sectionTitle = chapter?.title ?? 'Section $currentPage: Technical Specifications & Diagrams';
-                                        final sectionSummary = chapter?.summary ??
+                                        final hasChapter = chapterIdx >= 0 &&
+                                            chapterIdx < _book.chapters.length;
+                                        final chapter = hasChapter
+                                            ? _book.chapters[chapterIdx]
+                                            : null;
+                                        final sectionTitle = chapter?.title ??
+                                            'Section $currentPage: Technical Specifications & Diagrams';
+                                        final sectionSummary = chapter
+                                                ?.summary ??
                                             'Detailed architecture design principles, production constraints, performance optimization benchmarks, and modular component structures.';
 
                                         return Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               sectionTitle,
                                               style: GoogleFonts.inter(
-                                                color: isPaperMode ? Colors.black : Colors.white,
+                                                color: isPaperMode
+                                                    ? Colors.black
+                                                    : Colors.white,
                                                 fontSize: 18,
                                                 fontWeight: FontWeight.w800,
                                               ),
@@ -1887,7 +2058,9 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                             Text(
                                               sectionSummary,
                                               style: GoogleFonts.inter(
-                                                color: isPaperMode ? const Color(0xFF2C2C2C) : const Color(0xDEFFFFFF),
+                                                color: isPaperMode
+                                                    ? const Color(0xFF2C2C2C)
+                                                    : const Color(0xDEFFFFFF),
                                                 fontSize: 13,
                                                 height: 1.6,
                                               ),
@@ -1896,28 +2069,43 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                             Container(
                                               padding: const EdgeInsets.all(14),
                                               decoration: BoxDecoration(
-                                                color: isPaperMode ? Colors.black.withOpacity(0.04) : Colors.white.withOpacity(0.04),
-                                                borderRadius: BorderRadius.circular(10),
+                                                color: isPaperMode
+                                                    ? Colors.black
+                                                        .withOpacity(0.04)
+                                                    : Colors.white
+                                                        .withOpacity(0.04),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
                                                 border: Border.all(
-                                                  color: isPaperMode ? Colors.black12 : Colors.white10,
+                                                  color: isPaperMode
+                                                      ? Colors.black12
+                                                      : Colors.white10,
                                                 ),
                                               ),
                                               child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
                                                 children: [
                                                   Text(
                                                     'Page Notes & Execution Guidelines',
                                                     style: GoogleFonts.inter(
-                                                      color: isPaperMode ? Colors.black87 : Colors.white70,
+                                                      color: isPaperMode
+                                                          ? Colors.black87
+                                                          : Colors.white70,
                                                       fontSize: 12,
-                                                      fontWeight: FontWeight.bold,
+                                                      fontWeight:
+                                                          FontWeight.bold,
                                                     ),
                                                   ),
                                                   const SizedBox(height: 6),
                                                   Text(
                                                     '1. Always verify lifecycle integrity and prevent unbounded allocations.\n2. Utilize cached observables for asynchronous multi-subscriber streams.\n3. Keep layout hierarchies shallow to eliminate jank during high-velocity updates.',
                                                     style: GoogleFonts.firaCode(
-                                                      color: isPaperMode ? const Color(0xFF1E293B) : const Color(0xFF94A3B8),
+                                                      color: isPaperMode
+                                                          ? const Color(
+                                                              0xFF1E293B)
+                                                          : const Color(
+                                                              0xFF94A3B8),
                                                       fontSize: 11,
                                                       height: 1.5,
                                                     ),
@@ -1932,22 +2120,31 @@ class _BookDetailScreenState extends State<BookDetailScreen>
                                   ],
 
                                   const SizedBox(height: 28),
-                                  Divider(color: isPaperMode ? Colors.black12 : Colors.white12, height: 1),
+                                  Divider(
+                                      color: isPaperMode
+                                          ? Colors.black12
+                                          : Colors.white12,
+                                      height: 1),
                                   const SizedBox(height: 10),
                                   Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(
                                         'CodeSnap Document Engine',
                                         style: TextStyle(
-                                          color: isPaperMode ? Colors.black38 : Colors.white38,
+                                          color: isPaperMode
+                                              ? Colors.black38
+                                              : Colors.white38,
                                           fontSize: 10.5,
                                         ),
                                       ),
                                       Text(
                                         'Page $currentPage of ${_book.pages}',
                                         style: TextStyle(
-                                          color: isPaperMode ? Colors.black38 : Colors.white38,
+                                          color: isPaperMode
+                                              ? Colors.black38
+                                              : Colors.white38,
                                           fontSize: 10.5,
                                           fontWeight: FontWeight.bold,
                                         ),

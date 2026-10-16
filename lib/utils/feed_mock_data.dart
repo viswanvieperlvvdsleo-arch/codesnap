@@ -35,13 +35,15 @@ class FeedStory {
     this.isAddStory = false,
     this.isViewed = false,
     List<FeedStoryItem>? items,
-  }) : items = items ?? [
-          FeedStoryItem(id: '${id}_1', imageUrl: imageUrl, time: timeAgo),
-        ];
+  }) : items = items ??
+            [
+              FeedStoryItem(id: '${id}_1', imageUrl: imageUrl, time: timeAgo),
+            ];
 }
 
 class FeedPost {
   final String id;
+  final String? ownerId;
   final String username;
   final String location;
   final String avatarUrl;
@@ -61,6 +63,7 @@ class FeedPost {
 
   FeedPost({
     required this.id,
+    this.ownerId,
     required this.username,
     required this.location,
     required this.avatarUrl,
@@ -80,44 +83,49 @@ class FeedPost {
   });
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'username': username,
-    'location': location,
-    'avatarUrl': avatarUrl,
-    'imageUrl': imageUrl,
-    'commentsCount': commentsCount,
-    'sharesCount': sharesCount,
-    'likesCount': likesCount,
-    'captionTitle': captionTitle,
-    'captionBody': captionBody,
-    'musicTitle': musicTitle,
-    'musicArtist': musicArtist,
-    'musicCoverUrl': musicCoverUrl,
-    'likedByAvatars': likedByAvatars,
-    'likedByText': likedByText,
-    'isVideo': isVideo,
-    'videoUrl': videoUrl,
-  };
+        'id': id,
+        'ownerId': ownerId,
+        'username': username,
+        'location': location,
+        'avatarUrl': avatarUrl,
+        'imageUrl': imageUrl,
+        'commentsCount': commentsCount,
+        'sharesCount': sharesCount,
+        'likesCount': likesCount,
+        'captionTitle': captionTitle,
+        'captionBody': captionBody,
+        'musicTitle': musicTitle,
+        'musicArtist': musicArtist,
+        'musicCoverUrl': musicCoverUrl,
+        'likedByAvatars': likedByAvatars,
+        'likedByText': likedByText,
+        'isVideo': isVideo,
+        'videoUrl': videoUrl,
+      };
 
   factory FeedPost.fromJson(Map<String, dynamic> j) => FeedPost(
-    id: j['id']?.toString() ?? '',
-    username: j['username']?.toString() ?? 'developer',
-    location: j['location']?.toString() ?? 'Tokyo Cloud',
-    avatarUrl: j['avatarUrl']?.toString() ?? '',
-    imageUrl: j['imageUrl']?.toString() ?? '',
-    commentsCount: (j['commentsCount'] as num?)?.toInt() ?? 0,
-    sharesCount: (j['sharesCount'] as num?)?.toInt() ?? 0,
-    likesCount: (j['likesCount'] as num?)?.toInt() ?? 0,
-    captionTitle: j['captionTitle']?.toString() ?? '',
-    captionBody: j['captionBody']?.toString() ?? '',
-    musicTitle: j['musicTitle']?.toString() ?? 'Original Audio',
-    musicArtist: j['musicArtist']?.toString() ?? '',
-    musicCoverUrl: j['musicCoverUrl']?.toString() ?? '',
-    likedByAvatars: (j['likedByAvatars'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-    likedByText: j['likedByText']?.toString() ?? '',
-    isVideo: j['isVideo'] == true,
-    videoUrl: j['videoUrl']?.toString(),
-  );
+        id: j['id']?.toString() ?? '',
+        ownerId: j['ownerId']?.toString(),
+        username: j['username']?.toString() ?? 'developer',
+        location: j['location']?.toString() ?? 'Tokyo Cloud',
+        avatarUrl: j['avatarUrl']?.toString() ?? '',
+        imageUrl: j['imageUrl']?.toString() ?? '',
+        commentsCount: (j['commentsCount'] as num?)?.toInt() ?? 0,
+        sharesCount: (j['sharesCount'] as num?)?.toInt() ?? 0,
+        likesCount: (j['likesCount'] as num?)?.toInt() ?? 0,
+        captionTitle: j['captionTitle']?.toString() ?? '',
+        captionBody: j['captionBody']?.toString() ?? '',
+        musicTitle: j['musicTitle']?.toString() ?? 'Original Audio',
+        musicArtist: j['musicArtist']?.toString() ?? '',
+        musicCoverUrl: j['musicCoverUrl']?.toString() ?? '',
+        likedByAvatars: (j['likedByAvatars'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            [],
+        likedByText: j['likedByText']?.toString() ?? '',
+        isVideo: j['isVideo'] == true,
+        videoUrl: j['videoUrl']?.toString(),
+      );
 }
 
 class PickedPost {
@@ -156,19 +164,22 @@ class FeedMockData {
         items: [
           FeedStoryItem(
             id: 's1_1',
-            imageUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?q=80&w=600&auto=format&fit=crop',
             caption: 'Live streaming sunset photoshoot 🌅',
             time: 'Just now',
           ),
           FeedStoryItem(
             id: 's1_2',
-            imageUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=600&auto=format&fit=crop',
             caption: 'Behind the lens setup 📸',
             time: '5m ago',
           ),
           FeedStoryItem(
             id: 's1_3',
-            imageUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600&auto=format&fit=crop',
             caption: 'Final edit looks insane ✨',
             time: '12m ago',
           ),
@@ -183,13 +194,15 @@ class FeedMockData {
         items: [
           FeedStoryItem(
             id: 's2_1',
-            imageUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?q=80&w=600&auto=format&fit=crop',
             caption: 'Early morning flight route ✈️',
             time: '2m ago',
           ),
           FeedStoryItem(
             id: 's2_2',
-            imageUrl: 'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?q=80&w=600&auto=format&fit=crop',
             caption: 'Above the clouds ☁️',
             time: '15m ago',
           ),
@@ -204,13 +217,15 @@ class FeedMockData {
         items: [
           FeedStoryItem(
             id: 's3_1',
-            imageUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600&auto=format&fit=crop',
             caption: 'Studio lighting vibes 💡',
             time: '12m ago',
           ),
           FeedStoryItem(
             id: 's3_2',
-            imageUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=600&auto=format&fit=crop',
             caption: 'Collab with tech team 💻',
             time: '25m ago',
           ),
@@ -225,19 +240,22 @@ class FeedMockData {
         items: [
           FeedStoryItem(
             id: 's4_1',
-            imageUrl: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?q=80&w=600&auto=format&fit=crop',
             caption: 'Mountain hike adventure 🏔️',
             time: '45m ago',
           ),
           FeedStoryItem(
             id: 's4_2',
-            imageUrl: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=600&auto=format&fit=crop',
             caption: 'Reaching the summit! 🚀',
             time: '1h ago',
           ),
           FeedStoryItem(
             id: 's4_3',
-            imageUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=600&auto=format&fit=crop',
             caption: 'Camping under the stars ⭐',
             time: '2h ago',
           ),
@@ -252,13 +270,15 @@ class FeedMockData {
         items: [
           FeedStoryItem(
             id: 's5_1',
-            imageUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1517841905240-472988babdf9?q=80&w=600&auto=format&fit=crop',
             caption: 'City walks in rain 🌧️',
             time: '1h ago',
           ),
           FeedStoryItem(
             id: 's5_2',
-            imageUrl: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=600&auto=format&fit=crop',
+            imageUrl:
+                'https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=600&auto=format&fit=crop',
             caption: 'Coffee break & coding ☕',
             time: '3h ago',
           ),
@@ -316,7 +336,8 @@ class FeedMockData {
         ],
         likedByText: 'Liked by rohan.xo and 9.4K others',
         isVideo: true,
-        videoUrl: 'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4',
+        videoUrl:
+            'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4',
       ),
     ];
   }

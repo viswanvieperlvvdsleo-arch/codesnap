@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +14,10 @@ import '../services/storage_picker.dart';
 import 'individual_chat_screen.dart';
 import '../services/supabase_service.dart';
 import '../services/supabase_data_service.dart';
+import '../services/chat_service.dart';
+import '../services/ai_chat_service.dart';
+import '../services/realtime_sync_service.dart';
+import '../models/user_profile.dart';
 
 /// ─── Chat Data Models ────────────────────────────────────────────────────────
 class ChatMessage {
@@ -170,9 +175,7 @@ class ChatScreen extends StatefulWidget {
 /// tab navigations, page changes, and screen rebuilds.
 class ChatStateStore {
   static final ChatStateStore instance = ChatStateStore._();
-  ChatStateStore._() {
-    initDefaultConversations();
-  }
+  ChatStateStore._();
 
   ChatWallpaperConfig defaultWallpaper = const ChatWallpaperConfig(
     id: 'obsidian',
@@ -189,7 +192,8 @@ class ChatStateStore {
   );
 
   String? selectedConversationId;
-  final ValueNotifier<String?> selectedConversationNotifier = ValueNotifier<String?>(null);
+  final ValueNotifier<String?> selectedConversationNotifier =
+      ValueNotifier<String?>(null);
   final ValueNotifier<int> conversationsUpdateNotifier = ValueNotifier<int>(0);
 
   void notifyConversationsUpdated() {
@@ -213,10 +217,7 @@ class ChatStateStore {
   List<ChatConversation>? _conversations;
 
   List<ChatConversation> get conversations {
-    if (_conversations == null) {
-      initDefaultConversations();
-    }
-    return _conversations!;
+    return _conversations ??= <ChatConversation>[];
   }
 
   set conversations(List<ChatConversation> list) {
@@ -231,29 +232,34 @@ class ChatStateStore {
         id: 'server_terminal_ai',
         name: 'Remote Terminal AI',
         role: 'Claude 3.5 · GPT-4o · Codex Bridge',
-        avatarUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=200',
         isOnline: true,
         isAiAssistant: true,
         activeModel: 'Claude 3.5 Sonnet',
         terminalSession: 'tmux:0 · dev-worker',
-        lastMessage: '⚡ Code analysis complete: swipe actions & stories fixes verified.',
+        lastMessage:
+            '⚡ Code analysis complete: swipe actions & stories fixes verified.',
         time: 'Just now',
         unreadCount: 1,
         messages: [
           ChatMessage(
             id: 'ai_init_1',
-            text: '⚡ [Zero-Cost Server Terminal Bridge Connected]\nHost: dev-worker (tmux:0)\nProtocol: Remote Terminal Engine · Zero direct API billing\nSupported Models: Claude 3.5 Sonnet, GPT-4o, Codex, Antigravity',
+            text:
+                '⚡ [Zero-Cost Server Terminal Bridge Connected]\nHost: dev-worker (tmux:0)\nProtocol: Remote Terminal Engine · Zero direct API billing\nSupported Models: Claude 3.5 Sonnet, GPT-4o, Codex, Antigravity',
             isMe: false,
             time: '19:40',
             isDelivered: true,
           ),
           ChatMessage(
             id: 'ai_init_2',
-            text: 'Inspected recent mobile feed updates. Verified story card height translation and like toggle counters:',
+            text:
+                'Inspected recent mobile feed updates. Verified story card height translation and like toggle counters:',
             isMe: false,
             time: '19:41',
             codeLang: 'dart',
-            codeSnippet: '''// Fixed story container height and ListView clipping
+            codeSnippet:
+                '''// Fixed story container height and ListView clipping
 final storiesHeight = isDesktop ? 168.0 : 220.0;
 ListView.builder(
   clipBehavior: Clip.none,
@@ -264,7 +270,8 @@ ListView.builder(
           ),
           ChatMessage(
             id: 'ai_init_3',
-            text: 'Type your instruction or terminal command below (e.g., "run flutter test", "check git diff", "generate model"). The server terminal will execute it and stream output here!',
+            text:
+                'Type your instruction or terminal command below (e.g., "run flutter test", "check git diff", "generate model"). The server terminal will execute it and stream output here!',
             isMe: false,
             time: '19:42',
             isDelivered: true,
@@ -275,7 +282,8 @@ ListView.builder(
         id: '1',
         name: 'Mohit Bro Bihar',
         role: 'Fullstack Dev',
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
         isOnline: true,
         lastMessage: 'Okay',
         time: '19:48',
@@ -283,7 +291,8 @@ ListView.builder(
         messages: [
           ChatMessage(
             id: 'm1',
-            text: 'I want to crack a gov job it would be safe happy less tention',
+            text:
+                'I want to crack a gov job it would be safe happy less tention',
             isMe: true,
             time: '23:34',
           ),
@@ -301,7 +310,8 @@ ListView.builder(
           ),
           ChatMessage(
             id: 'm4',
-            text: 'Mm 🫠 once we get no family tentions, holidays tention, work tentions.\nMoney tention.',
+            text:
+                'Mm 🫠 once we get no family tentions, holidays tention, work tentions.\nMoney tention.',
             isMe: true,
             time: '23:34',
             reactions: ['👍'],
@@ -313,7 +323,8 @@ ListView.builder(
             time: '23:46',
             replyingTo: ChatMessage(
               id: 'm4_reply',
-              text: 'Mm 🫠 once we get no family tentions, holidays tentions...',
+              text:
+                  'Mm 🫠 once we get no family tentions, holidays tentions...',
               isMe: true,
               time: '23:34',
             ),
@@ -323,7 +334,8 @@ ListView.builder(
             text: 'Here is the liquid glass shader prototype on mobile!',
             isMe: false,
             time: '23:48',
-            mediaUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
+            mediaUrl:
+                'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
             mediaType: 'image',
             mediaCaption: 'Liquid glass shader preview with live blur',
             isDelivered: true,
@@ -376,21 +388,25 @@ ListView.builder(
         id: '2',
         name: 'Sarah Chen',
         role: 'Core Lead',
-        avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
         isOnline: true,
-        lastMessage: 'The new terminal engine runs with zero errors in Linux & Android!',
+        lastMessage:
+            'The new terminal engine runs with zero errors in Linux & Android!',
         time: '15m',
         unreadCount: 1,
         messages: [
           ChatMessage(
             id: 's1',
-            text: 'Did the zero-cost terminal engine compile properly on Android?',
+            text:
+                'Did the zero-cost terminal engine compile properly on Android?',
             isMe: true,
             time: '13:40',
           ),
           ChatMessage(
             id: 's2',
-            text: 'The new terminal engine runs with zero errors in Linux & Android!',
+            text:
+                'The new terminal engine runs with zero errors in Linux & Android!',
             isMe: false,
             time: '13:45',
             reactions: ['🔥'],
@@ -401,9 +417,11 @@ ListView.builder(
         id: '3',
         name: 'Arena Hackathon Alpha',
         role: 'Team Room',
-        avatarUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=200',
+        avatarUrl:
+            'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=200',
         isOnline: true,
-        lastMessage: 'Submissions are open! Lets review our live showdown demo.',
+        lastMessage:
+            'Submissions are open! Lets review our live showdown demo.',
         time: '1h',
         unreadCount: 4,
         messages: [
@@ -420,11 +438,15 @@ ListView.builder(
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  List<ChatConversation> get _conversations => ChatStateStore.instance.conversations;
-  set _conversations(List<ChatConversation> list) => ChatStateStore.instance.conversations = list;
+  List<ChatConversation> get _conversations =>
+      ChatStateStore.instance.conversations;
+  set _conversations(List<ChatConversation> list) =>
+      ChatStateStore.instance.conversations = list;
 
-  String? get _selectedConversationId => ChatStateStore.instance.selectedConversationId;
-  set _selectedConversationId(String? id) => ChatStateStore.instance.selectedConversationId = id;
+  String? get _selectedConversationId =>
+      ChatStateStore.instance.selectedConversationId;
+  set _selectedConversationId(String? id) =>
+      ChatStateStore.instance.selectedConversationId = id;
 
   final TextEditingController _msgCtrl = TextEditingController();
   final ScrollController _messagesScrollCtrl = ScrollController();
@@ -432,12 +454,16 @@ class _ChatScreenState extends State<ChatScreen> {
   ChatMessage? _replyingToMessage;
   String _activeWallpaper = 'obsidian';
 
-  ChatWallpaperConfig get _defaultWallpaper => ChatStateStore.instance.defaultWallpaper;
-  set _defaultWallpaper(ChatWallpaperConfig wp) => ChatStateStore.instance.defaultWallpaper = wp;
+  ChatWallpaperConfig get _defaultWallpaper =>
+      ChatStateStore.instance.defaultWallpaper;
+  set _defaultWallpaper(ChatWallpaperConfig wp) =>
+      ChatStateStore.instance.defaultWallpaper = wp;
 
   // Out-chat Contacts List Wallpaper
-  ChatWallpaperConfig get _contactsWallpaper => ChatStateStore.instance.contactsWallpaper;
-  set _contactsWallpaper(ChatWallpaperConfig wp) => ChatStateStore.instance.contactsWallpaper = wp;
+  ChatWallpaperConfig get _contactsWallpaper =>
+      ChatStateStore.instance.contactsWallpaper;
+  set _contactsWallpaper(ChatWallpaperConfig wp) =>
+      ChatStateStore.instance.contactsWallpaper = wp;
 
   bool _isExpanded = false;
 
@@ -447,6 +473,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // Text listener for mic vs send button toggle
   bool _isTyping = false;
+  bool _loadingConversations = true;
+  String? _conversationLoadError;
+  VoidCallback? _stopRealtime;
+  Timer? _realtimeRefreshTimer;
+  Timer? _accountSearchTimer;
+  List<UserProfile> _accountMatches = const [];
+  bool _searchingAccounts = false;
 
   @override
   void initState() {
@@ -454,16 +487,37 @@ class _ChatScreenState extends State<ChatScreen> {
     if (widget.isExpanded != null) {
       _isExpanded = widget.isExpanded!;
     }
-    _initMockConversations();
+    _loadConversations(showLoading: true);
     _msgCtrl.addListener(() {
       final isNowTyping = _msgCtrl.text.trim().isNotEmpty;
       if (isNowTyping != _isTyping) {
         setState(() => _isTyping = isNowTyping);
       }
     });
-    ChatStateStore.instance.selectedConversationNotifier.addListener(_onStoreConversationChanged);
-    ChatStateStore.instance.conversationsUpdateNotifier.addListener(_onConversationsUpdated);
+    ChatStateStore.instance.selectedConversationNotifier
+        .addListener(_onStoreConversationChanged);
+    ChatStateStore.instance.conversationsUpdateNotifier
+        .addListener(_onConversationsUpdated);
     _selectedConversationId = ChatStateStore.instance.selectedConversationId;
+    _stopRealtime = RealtimeSyncService.instance.subscribe(
+      const {
+        'conversations',
+        'conversation_participants',
+        'messages',
+        'message_reactions',
+        'message_user_flags',
+        'chat_calls',
+        'ai_threads',
+        'ai_messages',
+      },
+      (_) {
+        _realtimeRefreshTimer?.cancel();
+        _realtimeRefreshTimer = Timer(
+          const Duration(milliseconds: 180),
+          () => _loadConversations(showLoading: false),
+        );
+      },
+    );
   }
 
   void _onConversationsUpdated() {
@@ -471,14 +525,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _onStoreConversationChanged() {
-    if (mounted && _selectedConversationId != ChatStateStore.instance.selectedConversationNotifier.value) {
+    if (mounted &&
+        _selectedConversationId !=
+            ChatStateStore.instance.selectedConversationNotifier.value) {
       setState(() {
-        _selectedConversationId = ChatStateStore.instance.selectedConversationNotifier.value;
+        _selectedConversationId =
+            ChatStateStore.instance.selectedConversationNotifier.value;
       });
       widget.onActiveConversationChanged?.call(_selectedConversationId != null);
     }
   }
-
 
   @override
   void didUpdateWidget(ChatScreen oldWidget) {
@@ -491,15 +547,192 @@ class _ChatScreenState extends State<ChatScreen> {
   void _toggleExpand() {
     setState(() {
       _isExpanded = !_isExpanded;
-      if (_isExpanded && _selectedConversationId == null && _conversations.isNotEmpty) {
+      if (_isExpanded &&
+          _selectedConversationId == null &&
+          _conversations.isNotEmpty) {
         _selectedConversationId = _conversations.first.id;
       }
     });
     widget.onToggleExpand?.call(_isExpanded);
   }
 
-  void _initMockConversations() {
-    ChatStateStore.instance.initDefaultConversations();
+  Future<void> _loadConversations({required bool showLoading}) async {
+    if (!SupabaseService.isAuthenticated) {
+      _conversations = <ChatConversation>[];
+      if (mounted) {
+        setState(() {
+          _loadingConversations = false;
+          _conversationLoadError = 'Sign in to use realtime chat.';
+        });
+      }
+      return;
+    }
+    if (showLoading && mounted) {
+      setState(() {
+        _loadingConversations = true;
+        _conversationLoadError = null;
+      });
+    }
+    try {
+      final records = await ChatService.fetchConversations();
+      final aiHistory = await AiChatService.fetchLatestHistory();
+      final currentUserId = SupabaseService.currentUserId;
+      final existingWallpapers = {
+        for (final conversation in _conversations)
+          conversation.id: conversation.customWallpaper,
+      };
+
+      final loaded = records.map((record) {
+        final messages = record.messages
+            .map((message) => ChatMessage(
+                  id: message.id,
+                  text: message.text,
+                  isMe: message.senderId == currentUserId,
+                  time: _formatChatTime(message.createdAt),
+                  sentAt: message.createdAt,
+                  codeSnippet: message.codeSnippet,
+                  codeLang: message.codeLanguage,
+                  reactions: List<String>.from(message.reactions),
+                  isStarred: message.isStarred,
+                  isPinned: message.isPinned,
+                  mediaUrl: message.mediaUrl,
+                  mediaType: message.messageType == 'document'
+                      ? 'document'
+                      : message.messageType,
+                  mediaCaption: message.mediaName,
+                  isDelivered: true,
+                ))
+            .toList(growable: true);
+        final last = messages.isEmpty ? null : messages.last;
+        return ChatConversation(
+          id: record.id,
+          name: record.name,
+          role: record.role,
+          avatarUrl: record.avatarUrl.isNotEmpty
+              ? record.avatarUrl
+              : 'https://api.dicebear.com/9.x/initials/png?seed=${Uri.encodeComponent(record.name)}',
+          isOnline: true,
+          lastMessage: last?.mediaCaption?.isNotEmpty == true
+              ? last!.mediaCaption!
+              : (last?.text.isNotEmpty == true
+                  ? last!.text
+                  : 'No messages yet'),
+          time: _formatChatTime(record.updatedAt),
+          unreadCount: record.messages
+              .where((message) =>
+                  message.senderId != currentUserId && !message.isRead)
+              .length,
+          messages: messages,
+          customWallpaper: existingWallpapers[record.id],
+        );
+      }).toList(growable: true);
+
+      final aiMessages = aiHistory.messages.map((row) {
+        final sentAt = DateTime.tryParse(row['created_at']?.toString() ?? '') ??
+            DateTime.now();
+        return ChatMessage(
+          id: row['id'].toString(),
+          text: row['content']?.toString() ?? '',
+          isMe: row['role'] == 'user',
+          time: _formatChatTime(sentAt),
+          sentAt: sentAt,
+          isDelivered: true,
+        );
+      }).toList(growable: true);
+      loaded.insert(
+        0,
+        ChatConversation(
+          id: 'bug-ai',
+          name: 'Bug AI',
+          role: 'OpenAI coding assistant',
+          avatarUrl:
+              'https://api.dicebear.com/9.x/bottts-neutral/png?seed=BugAI',
+          isOnline: true,
+          lastMessage:
+              aiMessages.isEmpty ? 'Ask about your code' : aiMessages.last.text,
+          time: aiMessages.isEmpty ? '' : aiMessages.last.time,
+          messages: aiMessages,
+          customWallpaper: existingWallpapers['bug-ai'],
+          isAiAssistant: true,
+          activeModel: 'OpenAI',
+          terminalSession: aiHistory.threadId,
+        ),
+      );
+
+      _conversations = loaded;
+      if (_selectedConversationId != null &&
+          !loaded.any(
+              (conversation) => conversation.id == _selectedConversationId)) {
+        ChatStateStore.instance.selectConversation(null);
+      }
+      if (mounted) {
+        setState(() {
+          _loadingConversations = false;
+          _conversationLoadError = null;
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingConversations = false;
+        _conversationLoadError = 'Could not load chat from Supabase.\n$error';
+      });
+    }
+  }
+
+  String _formatChatTime(DateTime value) {
+    final local = value.toLocal();
+    final now = DateTime.now();
+    if (local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day) {
+      return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    }
+    return '${local.day}/${local.month}/${local.year}';
+  }
+
+  void _onChatSearchChanged(String value) {
+    setState(() => _searchQuery = value);
+    _accountSearchTimer?.cancel();
+    final query = value.trim().toLowerCase();
+    if (query.isEmpty) {
+      setState(() {
+        _accountMatches = const [];
+        _searchingAccounts = false;
+      });
+      return;
+    }
+    _accountSearchTimer = Timer(const Duration(milliseconds: 250), () async {
+      if (mounted) setState(() => _searchingAccounts = true);
+      try {
+        final rows = await SupabaseDataService.searchDevelopers(query);
+        final matches = rows
+            .map(UserProfile.fromPeopleDirectory)
+            .where((profile) => profile.id != SupabaseService.currentUserId)
+            .toList(growable: false);
+        if (!mounted || _searchQuery.trim().toLowerCase() != query) return;
+        setState(() => _accountMatches = matches);
+      } finally {
+        if (mounted && _searchQuery.trim().toLowerCase() == query) {
+          setState(() => _searchingAccounts = false);
+        }
+      }
+    });
+  }
+
+  Future<void> _openAccountChat(UserProfile profile) async {
+    try {
+      final conversationId =
+          await ChatService.getOrCreateDirectConversation(profile.id);
+      await _loadConversations(showLoading: false);
+      if (!mounted) return;
+      _selectConversation(conversationId);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not start chat: $error')),
+      );
+    }
   }
 
   void _selectConversation(String? id) {
@@ -521,7 +754,6 @@ class _ChatScreenState extends State<ChatScreen> {
     widget.onActiveConversationChanged?.call(id != null);
   }
 
-
   ChatConversation? get _activeConversation {
     if (_selectedConversationId == null) return null;
     try {
@@ -539,12 +771,14 @@ class _ChatScreenState extends State<ChatScreen> {
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       text: text,
       isMe: true,
-      time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}',
+      time:
+          '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}',
       replyingTo: _replyingToMessage,
     );
 
     setState(() {
-      final conv = _conversations.firstWhere((c) => c.id == _selectedConversationId);
+      final conv =
+          _conversations.firstWhere((c) => c.id == _selectedConversationId);
       conv.messages.add(newMsg);
       _replyingToMessage = null;
     });
@@ -582,7 +816,8 @@ class _ChatScreenState extends State<ChatScreen> {
           ? caption!.trim()
           : (mediaType == 'document' ? 'Shared document' : ''),
       isMe: true,
-      time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}',
+      time:
+          '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}',
       mediaUrl: mediaUrl,
       mediaType: mediaType,
       mediaCaption: caption?.trim(),
@@ -632,7 +867,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void _starSelectedMessages() {
     final conv = _activeConversation;
     if (conv == null) return;
-    final selected = conv.messages.where((m) => _selectedMessageIds.contains(m.id)).toList();
+    final selected =
+        conv.messages.where((m) => _selectedMessageIds.contains(m.id)).toList();
     final anyUnstarred = selected.any((m) => !m.isStarred);
     setState(() {
       for (final m in selected) {
@@ -642,14 +878,17 @@ class _ChatScreenState extends State<ChatScreen> {
       _selectedMessageIds.clear();
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(anyUnstarred ? 'Messages starred' : 'Messages unstarred')),
+      SnackBar(
+          content:
+              Text(anyUnstarred ? 'Messages starred' : 'Messages unstarred')),
     );
   }
 
   void _copySelectedMessages() {
     final conv = _activeConversation;
     if (conv == null) return;
-    final selected = conv.messages.where((m) => _selectedMessageIds.contains(m.id)).toList();
+    final selected =
+        conv.messages.where((m) => _selectedMessageIds.contains(m.id)).toList();
     final buffer = StringBuffer();
     for (final m in selected) {
       final sender = m.isMe ? 'You' : conv.name;
@@ -664,7 +903,8 @@ class _ChatScreenState extends State<ChatScreen> {
       _selectedMessageIds.clear();
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${selected.length} messages copied to clipboard')),
+      SnackBar(
+          content: Text('${selected.length} messages copied to clipboard')),
     );
   }
 
@@ -681,12 +921,12 @@ class _ChatScreenState extends State<ChatScreen> {
           builder: (context, setSheetState) {
             final allList = _conversations;
             final currentId = _selectedConversationId;
-            final candidates = allList
-                .where((c) => c.id != currentId)
-                .where((c) {
+            final candidates =
+                allList.where((c) => c.id != currentId).where((c) {
               if (searchQuery.isEmpty) return true;
               final q = searchQuery.toLowerCase();
-              return c.name.toLowerCase().contains(q) || c.role.toLowerCase().contains(q);
+              return c.name.toLowerCase().contains(q) ||
+                  c.role.toLowerCase().contains(q);
             }).toList();
 
             return BackdropFilter(
@@ -698,7 +938,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 padding: const EdgeInsets.fromLTRB(18, 14, 18, 20),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0C0E17).withOpacity(0.96),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
                   border: Border.all(color: Colors.white.withOpacity(0.18)),
                 ),
                 child: SafeArea(
@@ -718,7 +959,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       const SizedBox(height: 14),
                       Row(
                         children: [
-                          const Icon(LucideIcons.forward, color: Color(0xFF54C5F8), size: 18),
+                          const Icon(LucideIcons.forward,
+                              color: Color(0xFF54C5F8), size: 18),
                           const SizedBox(width: 8),
                           Text(
                             messagesToForward.length == 1
@@ -739,18 +981,21 @@ class _ChatScreenState extends State<ChatScreen> {
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.07),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white.withOpacity(0.12)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.12)),
                         ),
                         child: Row(
                           children: [
-                            const Icon(LucideIcons.search, size: 16, color: Colors.white54),
+                            const Icon(LucideIcons.search,
+                                size: 16, color: Colors.white54),
                             const SizedBox(width: 8),
                             Expanded(
                               child: TextField(
                                 onChanged: (val) {
                                   setSheetState(() => searchQuery = val.trim());
                                 },
-                                style: const TextStyle(color: Colors.white, fontSize: 13),
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 13),
                                 cursorColor: const Color(0xFF54C5F8),
                                 decoration: InputDecoration(
                                   hintText: 'Search contacts or connections...',
@@ -781,26 +1026,32 @@ class _ChatScreenState extends State<ChatScreen> {
                             : ListView.separated(
                                 physics: const BouncingScrollPhysics(),
                                 itemCount: candidates.length,
-                                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 8),
                                 itemBuilder: (context, i) {
                                   final conn = candidates[i];
                                   return Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 8),
                                     decoration: BoxDecoration(
                                       color: Colors.white.withOpacity(0.05),
                                       borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(color: Colors.white.withOpacity(0.08)),
+                                      border: Border.all(
+                                          color:
+                                              Colors.white.withOpacity(0.08)),
                                     ),
                                     child: Row(
                                       children: [
                                         CircleAvatar(
                                           radius: 18,
-                                          backgroundImage: NetworkImage(conn.avatarUrl),
+                                          backgroundImage:
+                                              NetworkImage(conn.avatarUrl),
                                         ),
                                         const SizedBox(width: 12),
                                         Expanded(
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               Text(
                                                 conn.name,
@@ -813,7 +1064,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                               Text(
                                                 conn.role,
                                                 style: TextStyle(
-                                                  color: Colors.white.withOpacity(0.5),
+                                                  color: Colors.white
+                                                      .withOpacity(0.5),
                                                   fontSize: 11,
                                                 ),
                                               ),
@@ -837,8 +1089,12 @@ class _ChatScreenState extends State<ChatScreen> {
                                                 ),
                                               );
                                             }
-                                            final lastOne = messagesToForward.last;
-                                            conn.lastMessage = lastOne.mediaCaption?.isNotEmpty == true
+                                            final lastOne =
+                                                messagesToForward.last;
+                                            conn.lastMessage = lastOne
+                                                        .mediaCaption
+                                                        ?.isNotEmpty ==
+                                                    true
                                                 ? lastOne.mediaCaption!
                                                 : (lastOne.text.isNotEmpty
                                                     ? lastOne.text
@@ -851,7 +1107,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                                 _selectedMessageIds.clear();
                                               });
                                             }
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
                                               SnackBar(
                                                 content: Text(
                                                   messagesToForward.length == 1
@@ -862,16 +1119,23 @@ class _ChatScreenState extends State<ChatScreen> {
                                             );
                                           },
                                           child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 14, vertical: 7),
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFF54C5F8).withOpacity(0.20),
-                                              borderRadius: BorderRadius.circular(10),
-                                              border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.6)),
+                                              color: const Color(0xFF54C5F8)
+                                                  .withOpacity(0.20),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                              border: Border.all(
+                                                  color: const Color(0xFF54C5F8)
+                                                      .withOpacity(0.6)),
                                             ),
                                             child: const Row(
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                Icon(LucideIcons.send, color: Color(0xFF54C5F8), size: 13),
+                                                Icon(LucideIcons.send,
+                                                    color: Color(0xFF54C5F8),
+                                                    size: 13),
                                                 SizedBox(width: 6),
                                                 Text(
                                                   'Send',
@@ -905,9 +1169,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void _forwardSelectedMessages() {
     final conv = _activeConversation;
     if (conv == null) return;
-    final msgs = conv.messages
-        .where((m) => _selectedMessageIds.contains(m.id))
-        .toList();
+    final msgs =
+        conv.messages.where((m) => _selectedMessageIds.contains(m.id)).toList();
     _forwardMessages(msgs);
   }
 
@@ -922,7 +1185,10 @@ class _ChatScreenState extends State<ChatScreen> {
       _selectedMessageIds.remove(msg.id);
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(forEveryone ? 'Message deleted for everyone' : 'Message deleted for me')),
+      SnackBar(
+          content: Text(forEveryone
+              ? 'Message deleted for everyone'
+              : 'Message deleted for me')),
     );
   }
 
@@ -933,11 +1199,13 @@ class _ChatScreenState extends State<ChatScreen> {
     final conv = _activeConversation;
     if (conv == null) return;
 
-    final selectedMsgs = conv.messages.where((m) => _selectedMessageIds.contains(m.id)).toList();
+    final selectedMsgs =
+        conv.messages.where((m) => _selectedMessageIds.contains(m.id)).toList();
     final now = DateTime.now();
     // Only if all selected messages were sent by me AND sent within 24 hours, can delete for everyone
     final canDeleteForEveryone = selectedMsgs.isNotEmpty &&
-        selectedMsgs.every((m) => m.isMe && now.difference(m.sentAt).inHours < 24);
+        selectedMsgs
+            .every((m) => m.isMe && now.difference(m.sentAt).inHours < 24);
 
     showDialog(
       context: context,
@@ -951,7 +1219,8 @@ class _ChatScreenState extends State<ChatScreen> {
           decoration: BoxDecoration(
             color: const Color(0xFF141926).withOpacity(0.82),
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.white.withOpacity(0.24), width: 1.2),
+            border:
+                Border.all(color: Colors.white.withOpacity(0.24), width: 1.2),
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -980,9 +1249,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFFFF5252).withOpacity(0.16),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFFF5252).withOpacity(0.35)),
+                  border: Border.all(
+                      color: const Color(0xFFFF5252).withOpacity(0.35)),
                 ),
-                child: const Icon(LucideIcons.trash2, size: 24, color: Color(0xFFFF5252)),
+                child: const Icon(LucideIcons.trash2,
+                    size: 24, color: Color(0xFFFF5252)),
               ),
               const SizedBox(height: 14),
               Text(
@@ -1016,12 +1287,15 @@ class _ChatScreenState extends State<ChatScreen> {
                   onTap: () {
                     Navigator.pop(ctx);
                     setState(() {
-                      conv.messages.removeWhere((m) => _selectedMessageIds.contains(m.id));
+                      conv.messages.removeWhere(
+                          (m) => _selectedMessageIds.contains(m.id));
                       _selectedMessageIds.clear();
                       _isMultiSelectMode = false;
                     });
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('$count messages deleted for everyone')),
+                      SnackBar(
+                          content:
+                              Text('$count messages deleted for everyone')),
                     );
                   },
                 ),
@@ -1030,12 +1304,15 @@ class _ChatScreenState extends State<ChatScreen> {
               _buildGlassDeleteBtn(
                 title: 'Delete for me',
                 icon: LucideIcons.trash,
-                color: canDeleteForEveryone ? Colors.white.withOpacity(0.9) : const Color(0xFFFF5252),
+                color: canDeleteForEveryone
+                    ? Colors.white.withOpacity(0.9)
+                    : const Color(0xFFFF5252),
                 isPrimary: !canDeleteForEveryone,
                 onTap: () {
                   Navigator.pop(ctx);
                   setState(() {
-                    conv.messages.removeWhere((m) => _selectedMessageIds.contains(m.id));
+                    conv.messages
+                        .removeWhere((m) => _selectedMessageIds.contains(m.id));
                     _selectedMessageIds.clear();
                     _isMultiSelectMode = false;
                   });
@@ -1066,7 +1343,8 @@ class _ChatScreenState extends State<ChatScreen> {
         pageBuilder: (context, anim, secAnim) => ContactInfoScreen(
           contactName: conv.name,
           contactAvatar: conv.avatarUrl,
-          contactHandle: '@${conv.name.toLowerCase().replaceAll(' ', '')} · ${conv.role}',
+          contactHandle:
+              '@${conv.name.toLowerCase().replaceAll(' ', '')} · ${conv.role}',
           isOnline: conv.isOnline,
           wallpaper: conv.customWallpaper ?? _defaultWallpaper,
         ),
@@ -1100,11 +1378,14 @@ class _ChatScreenState extends State<ChatScreen> {
             subtitle: '${msg.isMe ? "Sent by you" : conv.name} • ${msg.time}',
           ),
         );
-      } else if (msg.mediaType == 'document' || (msg.mediaUrl != null && msg.mediaType == 'document')) {
+      } else if (msg.mediaType == 'document' ||
+          (msg.mediaUrl != null && msg.mediaType == 'document')) {
         final docName = msg.mediaCaption?.isNotEmpty == true
             ? msg.mediaCaption!
             : (msg.text.isNotEmpty ? msg.text : 'Project_Doc.pdf');
-        final ext = docName.contains('.') ? docName.split('.').last.toUpperCase() : 'PDF';
+        final ext = docName.contains('.')
+            ? docName.split('.').last.toUpperCase()
+            : 'PDF';
         sharedDocs.add(
           DocItem(
             id: msg.id,
@@ -1114,7 +1395,9 @@ class _ChatScreenState extends State<ChatScreen> {
             date: msg.time,
             badgeColor: ext == 'PDF'
                 ? const Color(0xFFFF5252)
-                : (ext == 'JSON' ? const Color(0xFFFFD700) : const Color(0xFF54C5F8)),
+                : (ext == 'JSON'
+                    ? const Color(0xFFFFD700)
+                    : const Color(0xFF54C5F8)),
           ),
         );
       }
@@ -1126,9 +1409,14 @@ class _ChatScreenState extends State<ChatScreen> {
             sharedLinks.add(
               LinkItem(
                 id: 'link_${msg.id}_${word.hashCode}',
-                title: word.replaceAll('https://', '').replaceAll('http://', '').split('/').first,
+                title: word
+                    .replaceAll('https://', '')
+                    .replaceAll('http://', '')
+                    .split('/')
+                    .first,
                 url: word,
-                description: 'Shared by ${msg.isMe ? "you" : conv.name} at ${msg.time}',
+                description:
+                    'Shared by ${msg.isMe ? "you" : conv.name} at ${msg.time}',
                 icon: LucideIcons.link,
               ),
             );
@@ -1157,7 +1445,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ── Long-Press Menu Anchored ON SPECIFIC MESSAGE (Liquid Glass Theme) ──────
-  void _openMessageActionSheetOnBubble(ChatMessage msg, BuildContext bubbleContext) {
+  void _openMessageActionSheetOnBubble(
+      ChatMessage msg, BuildContext bubbleContext) {
     final RenderBox? box = bubbleContext.findRenderObject() as RenderBox?;
     if (box == null) return;
 
@@ -1180,7 +1469,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final double bubbleBottom = bubblePos.dy + bubbleSize.height;
 
     final double spaceAboveBubble = bubbleTop - topPadding;
-    final double spaceBelowBubble = screenSize.height - bubbleBottom - bottomPadding;
+    final double spaceBelowBubble =
+        screenSize.height - bubbleBottom - bottomPadding;
 
     // Check if message is "too low" (towards bottom of screen):
     final bool isLow = spaceBelowBubble < (preferredMenuHeight + gap + 16.0) ||
@@ -1200,7 +1490,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (menuTop < topPadding + 8.0) {
         menuTop = topPadding + 8.0;
-        maxMenuHeight = (pillTop - gap - menuTop).clamp(120.0, preferredMenuHeight);
+        maxMenuHeight =
+            (pillTop - gap - menuTop).clamp(120.0, preferredMenuHeight);
       }
     } else {
       // ── DROPDOWN: Message is near top/mid -> Drop DOWN below bubble ──
@@ -1208,27 +1499,33 @@ class _ChatScreenState extends State<ChatScreen> {
         // [Emoji Reaction Pill] -> [Message Bubble] -> [Dropdown Menu]
         pillTop = bubbleTop - pillHeight - gap;
         menuTop = bubbleBottom + gap;
-        final double availableBelowMenu = screenSize.height - menuTop - bottomPadding - 12.0;
+        final double availableBelowMenu =
+            screenSize.height - menuTop - bottomPadding - 12.0;
         maxMenuHeight = availableBelowMenu.clamp(140.0, preferredMenuHeight);
       } else {
         // [Message Bubble] -> [Emoji Reaction Pill] -> [Dropdown Menu]
         pillTop = bubbleBottom + gap;
         menuTop = pillTop + pillHeight + gap;
-        final double availableBelowMenu = screenSize.height - menuTop - bottomPadding - 12.0;
+        final double availableBelowMenu =
+            screenSize.height - menuTop - bottomPadding - 12.0;
         maxMenuHeight = availableBelowMenu.clamp(140.0, preferredMenuHeight);
       }
     }
 
     // Horizontal placement:
-    final double maxPillLeft = math.max(12.0, screenSize.width - pillWidth - 12.0);
-    final double maxMenuLeft = math.max(12.0, screenSize.width - menuWidth - 12.0);
+    final double maxPillLeft =
+        math.max(12.0, screenSize.width - pillWidth - 12.0);
+    final double maxMenuLeft =
+        math.max(12.0, screenSize.width - menuWidth - 12.0);
 
     double pillLeft;
     double menuLeft;
 
     if (msg.isMe) {
-      pillLeft = (bubblePos.dx + bubbleSize.width - pillWidth).clamp(12.0, maxPillLeft);
-      menuLeft = (bubblePos.dx + bubbleSize.width - menuWidth).clamp(12.0, maxMenuLeft);
+      pillLeft = (bubblePos.dx + bubbleSize.width - pillWidth)
+          .clamp(12.0, maxPillLeft);
+      menuLeft = (bubblePos.dx + bubbleSize.width - menuWidth)
+          .clamp(12.0, maxMenuLeft);
     } else {
       pillLeft = bubblePos.dx.clamp(12.0, maxPillLeft);
       menuLeft = bubblePos.dx.clamp(12.0, maxMenuLeft);
@@ -1238,7 +1535,8 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Dismiss Menu',
-      barrierColor: Colors.transparent, // Completely clear - no dark screen behind
+      barrierColor:
+          Colors.transparent, // Completely clear - no dark screen behind
       transitionDuration: const Duration(milliseconds: 180),
       transitionBuilder: (ctx, anim1, anim2, child) {
         return FadeTransition(
@@ -1296,11 +1594,13 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Material(
                 color: Colors.transparent,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: const Color(0xFF141926).withOpacity(0.70),
                     borderRadius: BorderRadius.circular(26),
-                    border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.28), width: 1.2),
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -1342,10 +1642,13 @@ class _ChatScreenState extends State<ChatScreen> {
                             child: Container(
                               padding: const EdgeInsets.all(4),
                               decoration: BoxDecoration(
-                                color: hasReacted ? const Color(0xFF54C5F8).withOpacity(0.22) : Colors.transparent,
+                                color: hasReacted
+                                    ? const Color(0xFF54C5F8).withOpacity(0.22)
+                                    : Colors.transparent,
                                 shape: BoxShape.circle,
                               ),
-                              child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                              child: Text(emoji,
+                                  style: const TextStyle(fontSize: 22)),
                             ),
                           ),
                         );
@@ -1370,7 +1673,8 @@ class _ChatScreenState extends State<ChatScreen> {
                               shape: BoxShape.circle,
                               color: Colors.white.withOpacity(0.14),
                             ),
-                            child: const Icon(LucideIcons.plus, size: 16, color: Colors.white),
+                            child: const Icon(LucideIcons.plus,
+                                size: 16, color: Colors.white),
                           ),
                         ),
                       ),
@@ -1391,7 +1695,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF141926).withOpacity(0.70),
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.28), width: 1.2),
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -1442,7 +1747,9 @@ class _ChatScreenState extends State<ChatScreen> {
                               Navigator.pop(dialogCtx);
                               Clipboard.setData(ClipboardData(text: msg.text));
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Message copied to clipboard')),
+                                const SnackBar(
+                                    content:
+                                        Text('Message copied to clipboard')),
                               );
                             },
                           ),
@@ -1465,13 +1772,15 @@ class _ChatScreenState extends State<ChatScreen> {
                           _buildAnchorMenuItem(
                             icon: LucideIcons.star,
                             title: msg.isStarred ? 'Unstar' : 'Star',
-                            accentColor: msg.isStarred ? const Color(0xFFFFD700) : null,
+                            accentColor:
+                                msg.isStarred ? const Color(0xFFFFD700) : null,
                             onTap: () {
                               Navigator.pop(dialogCtx);
                               setState(() => msg.isStarred = !msg.isStarred);
                             },
                           ),
-                          Divider(color: Colors.white.withOpacity(0.08), height: 1),
+                          Divider(
+                              color: Colors.white.withOpacity(0.08), height: 1),
                           _buildAnchorMenuItem(
                             icon: LucideIcons.checkSquare,
                             title: 'Select',
@@ -1556,7 +1865,8 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
             decoration: BoxDecoration(
               color: const Color(0xFF0C0D14).withOpacity(0.95),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
               border: Border.all(color: Colors.white.withOpacity(0.14)),
             ),
             child: SafeArea(
@@ -1628,7 +1938,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         Navigator.pop(ctx);
                         _showConfirmDialog(
                           title: 'Clear Chat?',
-                          message: 'All messages in this chat will be cleared permanently.',
+                          message:
+                              'All messages in this chat will be cleared permanently.',
                           confirmText: 'Clear Chat',
                           confirmColor: const Color(0xFFFF5252),
                           onConfirm: () {
@@ -1666,7 +1977,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       onTap: () {
                         Navigator.pop(ctx);
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Report submitted to CodeSnap Security team')),
+                          const SnackBar(
+                              content: Text(
+                                  'Report submitted to CodeSnap Security team')),
                         );
                       },
                     ),
@@ -1695,7 +2008,9 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Icon(icon, size: 18, color: color),
             const SizedBox(width: 14),
-            Text(title, style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w500)),
+            Text(title,
+                style: TextStyle(
+                    color: color, fontSize: 14, fontWeight: FontWeight.w500)),
           ],
         ),
       ),
@@ -1708,32 +2023,38 @@ class _ChatScreenState extends State<ChatScreen> {
       {
         'id': 'p1',
         'name': 'Cyber Grid',
-        'url': 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800',
+        'url':
+            'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800',
       },
       {
         'id': 'p2',
         'name': 'Liquid Glass',
-        'url': 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
+        'url':
+            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
       },
       {
         'id': 'p3',
         'name': 'Deep Nebula',
-        'url': 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=800',
+        'url':
+            'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=800',
       },
       {
         'id': 'p4',
         'name': 'Midnight Neon',
-        'url': 'https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=800',
+        'url':
+            'https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=800',
       },
       {
         'id': 'p5',
         'name': 'Terminal Flow',
-        'url': 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
+        'url':
+            'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
       },
       {
         'id': 'p6',
         'name': 'Dark Minimal',
-        'url': 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=800',
+        'url':
+            'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=800',
       },
     ];
 
@@ -1741,31 +2062,67 @@ class _ChatScreenState extends State<ChatScreen> {
       {
         'id': 'g1',
         'name': 'Cyber Neon',
-        'colors': [const Color(0xFF0F172A), const Color(0xFF0C1929), const Color(0xFF1E112A)],
+        'colors': [
+          const Color(0xFF0F172A),
+          const Color(0xFF0C1929),
+          const Color(0xFF1E112A)
+        ],
       },
       {
         'id': 'g2',
         'name': 'Aurora Emerald',
-        'colors': [const Color(0xFF051B17), const Color(0xFF07241C), const Color(0xFF0B1220)],
+        'colors': [
+          const Color(0xFF051B17),
+          const Color(0xFF07241C),
+          const Color(0xFF0B1220)
+        ],
       },
       {
         'id': 'g3',
         'name': 'Sunset Blaze',
-        'colors': [const Color(0xFF200E14), const Color(0xFF170C1E), const Color(0xFF0D0B16)],
+        'colors': [
+          const Color(0xFF200E14),
+          const Color(0xFF170C1E),
+          const Color(0xFF0D0B16)
+        ],
       },
       {
         'id': 'g4',
         'name': 'Deep Abyss',
-        'colors': [const Color(0xFF060B14), const Color(0xFF0A1526), const Color(0xFF05080E)],
+        'colors': [
+          const Color(0xFF060B14),
+          const Color(0xFF0A1526),
+          const Color(0xFF05080E)
+        ],
       },
     ];
 
     final solidColors = [
-      {'id': 'obsidian', 'name': 'Obsidian Void', 'color': const Color(0xFF07080A)},
-      {'id': 'midnight', 'name': 'Midnight Slate', 'color': const Color(0xFF0E131C)},
-      {'id': 'matrix', 'name': 'Cyber Terminal', 'color': const Color(0xFF07140E)},
-      {'id': 'nebula', 'name': 'Cosmic Nebula', 'color': const Color(0xFF140A1E)},
-      {'id': 'carbon', 'name': 'Steel Carbon', 'color': const Color(0xFF13151A)},
+      {
+        'id': 'obsidian',
+        'name': 'Obsidian Void',
+        'color': const Color(0xFF07080A)
+      },
+      {
+        'id': 'midnight',
+        'name': 'Midnight Slate',
+        'color': const Color(0xFF0E131C)
+      },
+      {
+        'id': 'matrix',
+        'name': 'Cyber Terminal',
+        'color': const Color(0xFF07140E)
+      },
+      {
+        'id': 'nebula',
+        'name': 'Cosmic Nebula',
+        'color': const Color(0xFF140A1E)
+      },
+      {
+        'id': 'carbon',
+        'name': 'Steel Carbon',
+        'color': const Color(0xFF13151A)
+      },
       {'id': 'black', 'name': 'Pure AMOLED', 'color': const Color(0xFF000000)},
     ];
 
@@ -1785,7 +2142,8 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
             decoration: BoxDecoration(
               color: const Color(0xFF0C0D14).withOpacity(0.96),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
               border: Border.all(color: Colors.white.withOpacity(0.16)),
             ),
             child: SafeArea(
@@ -1814,12 +2172,18 @@ class _ChatScreenState extends State<ChatScreen> {
                           children: [
                             const Text(
                               'Chat Wallpaper',
-                              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               'Customizing for ${conv.name}',
-                              style: TextStyle(color: const Color(0xFF54C5F8).withOpacity(0.9), fontSize: 12),
+                              style: TextStyle(
+                                  color:
+                                      const Color(0xFF54C5F8).withOpacity(0.9),
+                                  fontSize: 12),
                             ),
                           ],
                         ),
@@ -1831,7 +2195,8 @@ class _ChatScreenState extends State<ChatScreen> {
                               shape: BoxShape.circle,
                               color: Colors.white.withOpacity(0.08),
                             ),
-                            child: const Icon(LucideIcons.x, size: 18, color: Colors.white70),
+                            child: const Icon(LucideIcons.x,
+                                size: 18, color: Colors.white70),
                           ),
                         ),
                       ],
@@ -1860,17 +2225,20 @@ class _ChatScreenState extends State<ChatScreen> {
                         } catch (e) {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Storage access error: $e')),
+                              SnackBar(
+                                  content: Text('Storage access error: $e')),
                             );
                           }
                         }
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 14),
                         decoration: BoxDecoration(
                           color: const Color(0xFF54C5F8).withOpacity(0.12),
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+                          border: Border.all(
+                              color: const Color(0xFF54C5F8).withOpacity(0.35)),
                           boxShadow: [
                             BoxShadow(
                               color: const Color(0xFF54C5F8).withOpacity(0.12),
@@ -1887,7 +2255,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                 color: const Color(0xFF54C5F8).withOpacity(0.2),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(LucideIcons.imagePlus, color: Color(0xFF54C5F8), size: 22),
+                              child: const Icon(LucideIcons.imagePlus,
+                                  color: Color(0xFF54C5F8), size: 22),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -1896,17 +2265,23 @@ class _ChatScreenState extends State<ChatScreen> {
                                 children: [
                                   const Text(
                                     'Choose Photo from Gallery',
-                                    style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.bold),
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14.5,
+                                        fontWeight: FontWeight.bold),
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
                                     'Pick local photo, adjust blur & dimming',
-                                    style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 11.5),
+                                    style: TextStyle(
+                                        color: Colors.white.withOpacity(0.65),
+                                        fontSize: 11.5),
                                   ),
                                 ],
                               ),
                             ),
-                            const Icon(LucideIcons.chevronRight, color: Color(0xFF54C5F8), size: 18),
+                            const Icon(LucideIcons.chevronRight,
+                                color: Color(0xFF54C5F8), size: 18),
                           ],
                         ),
                       ),
@@ -1919,22 +2294,30 @@ class _ChatScreenState extends State<ChatScreen> {
                           setState(() => conv.customWallpaper = null);
                           Navigator.pop(pickerCtx);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Reset wallpaper for ${conv.name} to default')),
+                            SnackBar(
+                                content: Text(
+                                    'Reset wallpaper for ${conv.name} to default')),
                           );
                         },
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.06),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white.withOpacity(0.12)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.12)),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(LucideIcons.rotateCcw, size: 15, color: Colors.white70),
+                              const Icon(LucideIcons.rotateCcw,
+                                  size: 15, color: Colors.white70),
                               const SizedBox(width: 8),
-                              Text('Reset to Default Wallpaper', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12.5)),
+                              Text('Reset to Default Wallpaper',
+                                  style: TextStyle(
+                                      color: Colors.white.withOpacity(0.8),
+                                      fontSize: 12.5)),
                             ],
                           ),
                         ),
@@ -1945,13 +2328,18 @@ class _ChatScreenState extends State<ChatScreen> {
                     // 2. Curated Wallpapers (Photos)
                     const Text(
                       'Curated Art & Photos',
-                      style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5),
                     ),
                     const SizedBox(height: 10),
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 3,
                         crossAxisSpacing: 8,
                         mainAxisSpacing: 8,
@@ -1981,7 +2369,9 @@ class _ChatScreenState extends State<ChatScreen> {
                             child: Container(
                               decoration: BoxDecoration(
                                 border: Border.all(
-                                  color: isSel ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.15),
+                                  color: isSel
+                                      ? const Color(0xFF54C5F8)
+                                      : Colors.white.withOpacity(0.15),
                                   width: isSel ? 2 : 1,
                                 ),
                                 borderRadius: BorderRadius.circular(12),
@@ -1992,20 +2382,25 @@ class _ChatScreenState extends State<ChatScreen> {
                                   Image.network(
                                     p['url']!,
                                     fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => Container(color: Colors.white10),
+                                    errorBuilder: (_, __, ___) =>
+                                        Container(color: Colors.white10),
                                   ),
                                   Container(
                                     decoration: BoxDecoration(
                                       gradient: LinearGradient(
                                         begin: Alignment.topCenter,
                                         end: Alignment.bottomCenter,
-                                        colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                                        colors: [
+                                          Colors.transparent,
+                                          Colors.black.withOpacity(0.8)
+                                        ],
                                       ),
                                     ),
                                   ),
                                   if (isSel)
                                     const Center(
-                                      child: Icon(LucideIcons.check, color: Color(0xFF54C5F8), size: 24),
+                                      child: Icon(LucideIcons.check,
+                                          color: Color(0xFF54C5F8), size: 24),
                                     ),
                                   Positioned(
                                     bottom: 6,
@@ -2015,7 +2410,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                       p['name']!,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                 ],
@@ -2030,13 +2428,18 @@ class _ChatScreenState extends State<ChatScreen> {
                     // 3. Liquid Glass Gradients
                     const Text(
                       'Liquid Glass Gradients',
-                      style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5),
                     ),
                     const SizedBox(height: 10),
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
                         crossAxisSpacing: 10,
                         mainAxisSpacing: 10,
@@ -2070,7 +2473,9 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: isSel ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.18),
+                                color: isSel
+                                    ? const Color(0xFF54C5F8)
+                                    : Colors.white.withOpacity(0.18),
                                 width: isSel ? 2 : 1,
                               ),
                             ),
@@ -2079,11 +2484,15 @@ class _ChatScreenState extends State<ChatScreen> {
                               children: [
                                 Text(
                                   g['name'] as String,
-                                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600),
                                 ),
                                 const Spacer(),
                                 if (isSel)
-                                  const Icon(LucideIcons.check, color: Color(0xFF54C5F8), size: 16),
+                                  const Icon(LucideIcons.check,
+                                      color: Color(0xFF54C5F8), size: 16),
                               ],
                             ),
                           ),
@@ -2095,13 +2504,18 @@ class _ChatScreenState extends State<ChatScreen> {
                     // 4. Solid Dark Themes
                     const Text(
                       'Solid Minimalist Darks',
-                      style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5),
                     ),
                     const SizedBox(height: 10),
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 3,
                         crossAxisSpacing: 8,
                         mainAxisSpacing: 8,
@@ -2131,7 +2545,9 @@ class _ChatScreenState extends State<ChatScreen> {
                               color: color,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: isSel ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.15),
+                                color: isSel
+                                    ? const Color(0xFF54C5F8)
+                                    : Colors.white.withOpacity(0.15),
                                 width: isSel ? 2 : 1,
                               ),
                             ),
@@ -2140,9 +2556,12 @@ class _ChatScreenState extends State<ChatScreen> {
                                 s['name'] as String,
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
-                                  color: isSel ? const Color(0xFF54C5F8) : Colors.white70,
+                                  color: isSel
+                                      ? const Color(0xFF54C5F8)
+                                      : Colors.white70,
                                   fontSize: 10.5,
-                                  fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
+                                  fontWeight:
+                                      isSel ? FontWeight.bold : FontWeight.w500,
                                 ),
                               ),
                             ),
@@ -2162,7 +2581,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ── Open Wallpaper Adjust Modal Sheet ─────────────────────────────────────
-  void _openWallpaperAdjustSheet(ChatConversation conv, ChatWallpaperConfig config) {
+  void _openWallpaperAdjustSheet(
+      ChatConversation conv, ChatWallpaperConfig config) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -2216,7 +2636,8 @@ class _ChatScreenState extends State<ChatScreen> {
               padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.28), width: 1.2),
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -2238,16 +2659,26 @@ class _ChatScreenState extends State<ChatScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                  Text(title,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  Text(message, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, height: 1.4)),
+                  Text(message,
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 13,
+                          height: 1.4)),
                   const SizedBox(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx),
-                        child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.6))),
+                        child: Text('Cancel',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.6))),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
@@ -2258,9 +2689,12 @@ class _ChatScreenState extends State<ChatScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: confirmColor.withOpacity(0.2),
                           foregroundColor: confirmColor,
-                          side: BorderSide(color: confirmColor.withOpacity(0.5)),
+                          side:
+                              BorderSide(color: confirmColor.withOpacity(0.5)),
                         ),
-                        child: Text(confirmText, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        child: Text(confirmText,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -2283,7 +2717,8 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Container(
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
               border: Border.all(color: Colors.white.withOpacity(0.25)),
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -2303,11 +2738,17 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Container(
                     width: 38,
                     height: 4,
-                    decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(2)),
+                    decoration: BoxDecoration(
+                        color: Colors.white30,
+                        borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text('Message Info', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                const Text('Message Info',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold)),
                 const SizedBox(height: 14),
                 _buildInfoRow('Sent', msg.time),
                 _buildInfoRow('Status', 'Delivered & Read (...)'),
@@ -2328,14 +2769,18 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13)),
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(label,
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.6), fontSize: 13)),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
-
-
 
   void _promptDeleteMessage(ChatMessage msg) {
     final now = DateTime.now();
@@ -2349,14 +2794,16 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (ctx) {
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 340),
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
               color: const Color(0xFF141926).withOpacity(0.82),
               borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: Colors.white.withOpacity(0.24), width: 1.2),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.24), width: 1.2),
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
@@ -2385,9 +2832,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF5252).withOpacity(0.16),
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFFF5252).withOpacity(0.35)),
+                    border: Border.all(
+                        color: const Color(0xFFFF5252).withOpacity(0.35)),
                   ),
-                  child: const Icon(LucideIcons.trash2, size: 24, color: Color(0xFFFF5252)),
+                  child: const Icon(LucideIcons.trash2,
+                      size: 24, color: Color(0xFFFF5252)),
                 ),
                 const SizedBox(height: 14),
                 const Text(
@@ -2434,7 +2883,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 _buildGlassDeleteBtn(
                   title: 'Delete for me',
                   icon: LucideIcons.trash,
-                  color: canDeleteForEveryone ? Colors.white.withOpacity(0.9) : const Color(0xFFFF5252),
+                  color: canDeleteForEveryone
+                      ? Colors.white.withOpacity(0.9)
+                      : const Color(0xFFFF5252),
                   isPrimary: !canDeleteForEveryone,
                   onTap: () {
                     Navigator.pop(ctx);
@@ -2472,10 +2923,14 @@ class _ChatScreenState extends State<ChatScreen> {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: isPrimary ? color.withOpacity(0.18) : Colors.white.withOpacity(0.08),
+          color: isPrimary
+              ? color.withOpacity(0.18)
+              : Colors.white.withOpacity(0.08),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isPrimary ? color.withOpacity(0.55) : Colors.white.withOpacity(0.20),
+            color: isPrimary
+                ? color.withOpacity(0.55)
+                : Colors.white.withOpacity(0.20),
             width: 1.1,
           ),
           boxShadow: isPrimary
@@ -2510,13 +2965,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-    ChatStateStore.instance.selectedConversationNotifier.removeListener(_onStoreConversationChanged);
-    ChatStateStore.instance.conversationsUpdateNotifier.removeListener(_onConversationsUpdated);
+    _stopRealtime?.call();
+    _realtimeRefreshTimer?.cancel();
+    _accountSearchTimer?.cancel();
+    ChatStateStore.instance.selectedConversationNotifier
+        .removeListener(_onStoreConversationChanged);
+    ChatStateStore.instance.conversationsUpdateNotifier
+        .removeListener(_onConversationsUpdated);
     _msgCtrl.dispose();
     _messagesScrollCtrl.dispose();
     super.dispose();
   }
-
 
   Color _getWallpaperColor() {
     return _defaultWallpaper.solidColor ?? const Color(0xFF07080A);
@@ -2525,7 +2984,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isExpanded) {
-      final activeConv = _activeConversation ?? (_conversations.isNotEmpty ? _conversations.first : null);
+      final activeConv = _activeConversation ??
+          (_conversations.isNotEmpty ? _conversations.first : null);
 
       return Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2605,17 +3065,22 @@ class _ChatScreenState extends State<ChatScreen> {
                 color: Colors.white.withOpacity(0.06),
                 border: Border.all(color: Colors.white.withOpacity(0.12)),
               ),
-              child: const Icon(LucideIcons.messageSquare, size: 36, color: Color(0xFF54C5F8)),
+              child: const Icon(LucideIcons.messageSquare,
+                  size: 36, color: Color(0xFF54C5F8)),
             ),
             const SizedBox(height: 16),
             const Text(
               'Select a conversation',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             Text(
               'Choose a teammate from the left to start chatting',
-              style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 12.5),
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.55), fontSize: 12.5),
             ),
           ],
         ),
@@ -2650,21 +3115,110 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               _buildHeader(),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: _buildSearchBar(),
               ),
-              _buildOnlineTeammates(),
+              if (!_loadingConversations &&
+                  _conversationLoadError == null &&
+                  _searchQuery.trim().isEmpty)
+                _buildOnlineTeammates(),
               const Divider(color: Color(0x1AFFFFFF), height: 16),
               Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
-                  itemBuilder: (context, i) {
-                    final c = filtered[i];
-                    return _buildConversationItem(c);
-                  },
-                ),
+                child: _loadingConversations
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF54C5F8),
+                        ),
+                      )
+                    : _conversationLoadError != null
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _conversationLoadError!,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Colors.white60,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextButton(
+                                    onPressed: () =>
+                                        _loadConversations(showLoading: true),
+                                    child: const Text('Retry'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : _searchQuery.trim().isEmpty && filtered.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No conversations yet',
+                                  style: TextStyle(color: Colors.white54),
+                                ),
+                              )
+                            : ListView(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 4),
+                                children: [
+                                  if (_searchQuery.trim().isNotEmpty) ...[
+                                    Row(children: [
+                                      const Text('Accounts',
+                                          style: TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700)),
+                                      const Spacer(),
+                                      if (_searchingAccounts)
+                                        const SizedBox(
+                                          width: 13,
+                                          height: 13,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Color(0xFF54C5F8),
+                                          ),
+                                        ),
+                                    ]),
+                                    const SizedBox(height: 8),
+                                    for (final profile in _accountMatches) ...[
+                                      _buildAccountSearchItem(profile),
+                                      const SizedBox(height: 6),
+                                    ],
+                                    if (!_searchingAccounts &&
+                                        _accountMatches.isEmpty)
+                                      const Padding(
+                                        padding:
+                                            EdgeInsets.symmetric(vertical: 12),
+                                        child: Text(
+                                          'No matching accounts',
+                                          style:
+                                              TextStyle(color: Colors.white38),
+                                        ),
+                                      ),
+                                    if (filtered.isNotEmpty) ...[
+                                      const Padding(
+                                        padding:
+                                            EdgeInsets.only(top: 10, bottom: 8),
+                                        child: Text('Existing chats',
+                                            style: TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700)),
+                                      ),
+                                    ],
+                                  ],
+                                  for (final conversation in filtered) ...[
+                                    _buildConversationItem(conversation),
+                                    const SizedBox(height: 6),
+                                  ],
+                                ],
+                              ),
               ),
             ],
           ),
@@ -2673,12 +3227,54 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  Widget _buildAccountSearchItem(UserProfile profile) {
+    final avatar = profile.avatarUrl.isNotEmpty
+        ? profile.avatarUrl
+        : 'https://api.dicebear.com/9.x/initials/png?seed=${Uri.encodeComponent(profile.name)}';
+    return SpringButton(
+      onTap: () => _openAccountChat(profile),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0x0FFFFFFF),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0x1AFFFFFF)),
+        ),
+        child: Row(children: [
+          CircleAvatar(radius: 20, backgroundImage: NetworkImage(avatar)),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(profile.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w700)),
+                Text(
+                  profile.handle.isNotEmpty ? profile.handle : profile.headline,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          const Icon(LucideIcons.messageCircle,
+              size: 18, color: Color(0xFF54C5F8)),
+        ]),
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Row(
         children: [
-          const Icon(LucideIcons.messageSquare, color: Color(0xFF54C5F8), size: 20),
+          const Icon(LucideIcons.messageSquare,
+              color: Color(0xFF54C5F8), size: 20),
           const SizedBox(width: 10),
           Text(
             'Developer Chat',
@@ -2697,14 +3293,20 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Container(
                 padding: const EdgeInsets.all(7.5),
                 decoration: BoxDecoration(
-                  color: _isExpanded ? const Color(0xFF54C5F8).withOpacity(0.18) : Colors.white.withOpacity(0.08),
+                  color: _isExpanded
+                      ? const Color(0xFF54C5F8).withOpacity(0.18)
+                      : Colors.white.withOpacity(0.08),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: _isExpanded ? const Color(0xFF54C5F8).withOpacity(0.6) : Colors.white.withOpacity(0.18),
+                    color: _isExpanded
+                        ? const Color(0xFF54C5F8).withOpacity(0.6)
+                        : Colors.white.withOpacity(0.18),
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: _isExpanded ? const Color(0xFF54C5F8).withOpacity(0.25) : Colors.black.withOpacity(0.2),
+                      color: _isExpanded
+                          ? const Color(0xFF54C5F8).withOpacity(0.25)
+                          : Colors.black.withOpacity(0.2),
                       blurRadius: 10,
                       offset: const Offset(0, 2),
                     ),
@@ -2737,7 +3339,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ],
               ),
-              child: const Icon(LucideIcons.moreVertical, color: Colors.white, size: 17),
+              child: const Icon(LucideIcons.moreVertical,
+                  color: Colors.white, size: 17),
             ),
           ),
         ],
@@ -2763,14 +3366,18 @@ class _ChatScreenState extends State<ChatScreen> {
               Container(
                 width: 36,
                 height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2)),
               ),
               const SizedBox(height: 16),
-              _buildSheetMenuTile(LucideIcons.image, 'Wallpaper', 'Change background for contacts list', () {
+              _buildSheetMenuTile(LucideIcons.image, 'Wallpaper',
+                  'Change background for contacts list', () {
                 Navigator.pop(ctx);
                 _openContactsWallpaperPicker();
               }),
-              _buildSheetMenuTile(LucideIcons.settings, 'Settings', 'Preferences, notifications, storage', () {
+              _buildSheetMenuTile(LucideIcons.settings, 'Settings',
+                  'Preferences, notifications, storage', () {
                 Navigator.pop(ctx);
                 Navigator.push(
                   context,
@@ -2790,7 +3397,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 );
               }),
-              _buildSheetMenuTile(LucideIcons.trash2, 'Clear All Chats', 'Delete all conversation messages', () {
+              _buildSheetMenuTile(LucideIcons.trash2, 'Clear All Chats',
+                  'Delete all conversation messages', () {
                 Navigator.pop(ctx);
                 setState(() {
                   for (final c in _conversations) {
@@ -2808,7 +3416,9 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildSheetMenuTile(IconData icon, String title, String subtitle, VoidCallback onTap, {bool isDestructive = false}) {
+  Widget _buildSheetMenuTile(
+      IconData icon, String title, String subtitle, VoidCallback onTap,
+      {bool isDestructive = false}) {
     return SpringButton(
       onTap: onTap,
       child: Container(
@@ -2816,18 +3426,29 @@ class _ChatScreenState extends State<ChatScreen> {
         margin: const EdgeInsets.only(bottom: 6),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          color: isDestructive ? const Color(0xFFFF5252).withOpacity(0.08) : Colors.white.withOpacity(0.04),
-          border: Border.all(color: isDestructive ? const Color(0xFFFF5252).withOpacity(0.2) : Colors.white.withOpacity(0.08)),
+          color: isDestructive
+              ? const Color(0xFFFF5252).withOpacity(0.08)
+              : Colors.white.withOpacity(0.04),
+          border: Border.all(
+              color: isDestructive
+                  ? const Color(0xFFFF5252).withOpacity(0.2)
+                  : Colors.white.withOpacity(0.08)),
         ),
         child: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: isDestructive ? const Color(0xFFFF5252).withOpacity(0.15) : const Color(0xFF54C5F8).withOpacity(0.15),
+                color: isDestructive
+                    ? const Color(0xFFFF5252).withOpacity(0.15)
+                    : const Color(0xFF54C5F8).withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 18, color: isDestructive ? const Color(0xFFFF5252) : const Color(0xFF54C5F8)),
+              child: Icon(icon,
+                  size: 18,
+                  color: isDestructive
+                      ? const Color(0xFFFF5252)
+                      : const Color(0xFF54C5F8)),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -2838,7 +3459,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   Text(
                     title,
                     style: TextStyle(
-                      color: isDestructive ? const Color(0xFFFF5252) : Colors.white,
+                      color: isDestructive
+                          ? const Color(0xFFFF5252)
+                          : Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
                     ),
@@ -2846,12 +3469,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 11),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.55), fontSize: 11),
                   ),
                 ],
               ),
             ),
-            Icon(LucideIcons.chevronRight, size: 16, color: Colors.white.withOpacity(0.4)),
+            Icon(LucideIcons.chevronRight,
+                size: 16, color: Colors.white.withOpacity(0.4)),
           ],
         ),
       ),
@@ -2871,28 +3496,99 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildContactsWallpaperPickerSheet(BuildContext pickerCtx) {
     final curatedWallpapers = [
-      {'name': 'Cyber Neon', 'url': 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800'},
-      {'name': 'Deep Nebula', 'url': 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=800'},
-      {'name': 'Mountain Mist', 'url': 'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800'},
-      {'name': 'Tokyo Night', 'url': 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800'},
-      {'name': 'Dark Aurora', 'url': 'https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?w=800'},
-      {'name': 'Geometric Glass', 'url': 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800'},
+      {
+        'name': 'Cyber Neon',
+        'url': 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800'
+      },
+      {
+        'name': 'Deep Nebula',
+        'url':
+            'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=800'
+      },
+      {
+        'name': 'Mountain Mist',
+        'url':
+            'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800'
+      },
+      {
+        'name': 'Tokyo Night',
+        'url':
+            'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800'
+      },
+      {
+        'name': 'Dark Aurora',
+        'url':
+            'https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?w=800'
+      },
+      {
+        'name': 'Geometric Glass',
+        'url':
+            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800'
+      },
     ];
 
     final gradients = [
-      {'name': 'Midnight Cyan', 'colors': [const Color(0xFF0F2027), const Color(0xFF203A43), const Color(0xFF2C5364)]},
-      {'name': 'Deep Purple', 'colors': [const Color(0xFF14072B), const Color(0xFF2D0C54), const Color(0xFF0D041A)]},
-      {'name': 'Emerald Dark', 'colors': [const Color(0xFF051911), const Color(0xFF0C3827), const Color(0xFF030D08)]},
-      {'name': 'Sunset Ember', 'colors': [const Color(0xFF2C0B0E), const Color(0xFF4A1521), const Color(0xFF150407)]},
+      {
+        'name': 'Midnight Cyan',
+        'colors': [
+          const Color(0xFF0F2027),
+          const Color(0xFF203A43),
+          const Color(0xFF2C5364)
+        ]
+      },
+      {
+        'name': 'Deep Purple',
+        'colors': [
+          const Color(0xFF14072B),
+          const Color(0xFF2D0C54),
+          const Color(0xFF0D041A)
+        ]
+      },
+      {
+        'name': 'Emerald Dark',
+        'colors': [
+          const Color(0xFF051911),
+          const Color(0xFF0C3827),
+          const Color(0xFF030D08)
+        ]
+      },
+      {
+        'name': 'Sunset Ember',
+        'colors': [
+          const Color(0xFF2C0B0E),
+          const Color(0xFF4A1521),
+          const Color(0xFF150407)
+        ]
+      },
     ];
 
     final solidColors = [
-      {'name': 'Obsidian Void', 'color': const Color(0xFF07080A), 'id': 'obsidian'},
-      {'name': 'OLED Pure Black', 'color': const Color(0xFF000000), 'id': 'oled'},
-      {'name': 'Charcoal Navy', 'color': const Color(0xFF0D1117), 'id': 'charcoal'},
+      {
+        'name': 'Obsidian Void',
+        'color': const Color(0xFF07080A),
+        'id': 'obsidian'
+      },
+      {
+        'name': 'OLED Pure Black',
+        'color': const Color(0xFF000000),
+        'id': 'oled'
+      },
+      {
+        'name': 'Charcoal Navy',
+        'color': const Color(0xFF0D1117),
+        'id': 'charcoal'
+      },
       {'name': 'Deep Slate', 'color': const Color(0xFF11141C), 'id': 'slate'},
-      {'name': 'Gunmetal Gray', 'color': const Color(0xFF16181F), 'id': 'gunmetal'},
-      {'name': 'Night Indigo', 'color': const Color(0xFF0E1020), 'id': 'indigo'},
+      {
+        'name': 'Gunmetal Gray',
+        'color': const Color(0xFF16181F),
+        'id': 'gunmetal'
+      },
+      {
+        'name': 'Night Indigo',
+        'color': const Color(0xFF0E1020),
+        'id': 'indigo'
+      },
     ];
 
     return Container(
@@ -2931,12 +3627,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     children: [
                       Text(
                         'Contacts Wallpaper',
-                        style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold),
                       ),
                       SizedBox(height: 2),
                       Text(
                         'Shows behind contacts list (out-chat)',
-                        style: TextStyle(color: Color(0xFF54C5F8), fontSize: 12),
+                        style:
+                            TextStyle(color: Color(0xFF54C5F8), fontSize: 12),
                       ),
                     ],
                   ),
@@ -2948,7 +3648,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         shape: BoxShape.circle,
                         color: Colors.white.withOpacity(0.08),
                       ),
-                      child: const Icon(LucideIcons.x, size: 18, color: Colors.white70),
+                      child: const Icon(LucideIcons.x,
+                          size: 18, color: Colors.white70),
                     ),
                   ),
                 ],
@@ -2982,11 +3683,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   }
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: const Color(0xFF54C5F8).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+                    border: Border.all(
+                        color: const Color(0xFF54C5F8).withOpacity(0.35)),
                   ),
                   child: Row(
                     children: [
@@ -2996,7 +3699,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           color: const Color(0xFF54C5F8).withOpacity(0.2),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(LucideIcons.imagePlus, color: Color(0xFF54C5F8), size: 22),
+                        child: const Icon(LucideIcons.imagePlus,
+                            color: Color(0xFF54C5F8), size: 22),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -3005,17 +3709,23 @@ class _ChatScreenState extends State<ChatScreen> {
                           children: [
                             const Text(
                               'Choose Photo from Gallery',
-                              style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               'Pick local photo for contacts background',
-                              style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 11.5),
+                              style: TextStyle(
+                                  color: Colors.white.withOpacity(0.65),
+                                  fontSize: 11.5),
                             ),
                           ],
                         ),
                       ),
-                      const Icon(LucideIcons.chevronRight, color: Color(0xFF54C5F8), size: 18),
+                      const Icon(LucideIcons.chevronRight,
+                          color: Color(0xFF54C5F8), size: 18),
                     ],
                   ),
                 ),
@@ -3034,11 +3744,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   });
                   Navigator.pop(pickerCtx);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Contacts wallpaper reset to default')),
+                    const SnackBar(
+                        content: Text('Contacts wallpaper reset to default')),
                   );
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.06),
                     borderRadius: BorderRadius.circular(12),
@@ -3047,16 +3759,24 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(LucideIcons.rotateCcw, size: 15, color: Colors.white70),
+                      const Icon(LucideIcons.rotateCcw,
+                          size: 15, color: Colors.white70),
                       const SizedBox(width: 8),
-                      Text('Reset Contacts Wallpaper to Default', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12.5)),
+                      Text('Reset Contacts Wallpaper to Default',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontSize: 12.5)),
                     ],
                   ),
                 ),
               ),
 
               const SizedBox(height: 20),
-              const Text('Curated Art & Photos', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
+              const Text('Curated Art & Photos',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               GridView.builder(
                 shrinkWrap: true,
@@ -3095,7 +3815,10 @@ class _ChatScreenState extends State<ChatScreen> {
                               gradient: LinearGradient(
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
-                                colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withOpacity(0.8)
+                                ],
                               ),
                             ),
                           ),
@@ -3107,7 +3830,10 @@ class _ChatScreenState extends State<ChatScreen> {
                               wp['name']!,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold),
                             ),
                           ),
                         ],
@@ -3118,7 +3844,11 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
 
               const SizedBox(height: 20),
-              const Text('Minimalist Gradients', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
+              const Text('Minimalist Gradients',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               GridView.builder(
                 shrinkWrap: true,
@@ -3149,13 +3879,17 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: BoxDecoration(
                         gradient: LinearGradient(colors: colors),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withOpacity(0.18)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.18)),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Center(
                         child: Text(
                           g['name'] as String,
-                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600),
                         ),
                       ),
                     ),
@@ -3164,7 +3898,11 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
 
               const SizedBox(height: 20),
-              const Text('Solid Minimalist Darks', style: TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.bold)),
+              const Text('Solid Minimalist Darks',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               GridView.builder(
                 shrinkWrap: true,
@@ -3195,13 +3933,17 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: BoxDecoration(
                         color: color,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.15)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.15)),
                       ),
                       child: Center(
                         child: Text(
                           s['name'] as String,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w500),
+                          style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w500),
                         ),
                       ),
                     ),
@@ -3246,13 +3988,15 @@ class _ChatScreenState extends State<ChatScreen> {
         border: Border.all(color: const Color(0x26FFFFFF)),
       ),
       child: TextField(
-        onChanged: (v) => setState(() => _searchQuery = v),
+        onChanged: _onChatSearchChanged,
         style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
         cursorColor: Colors.white,
         decoration: InputDecoration(
           hintText: 'Search teammates, repos, topics...',
-          hintStyle: GoogleFonts.inter(color: Colors.white.withOpacity(0.45), fontSize: 12),
-          prefixIcon: const Icon(LucideIcons.search, size: 16, color: Colors.white60),
+          hintStyle: GoogleFonts.inter(
+              color: Colors.white.withOpacity(0.45), fontSize: 12),
+          prefixIcon:
+              const Icon(LucideIcons.search, size: 16, color: Colors.white60),
           filled: false,
           fillColor: Colors.transparent,
           border: InputBorder.none,
@@ -3294,7 +4038,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         decoration: BoxDecoration(
                           color: const Color(0xFF4ADE80),
                           shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFF09090B), width: 1.5),
+                          border: Border.all(
+                              color: const Color(0xFF09090B), width: 1.5),
                         ),
                       ),
                     ),
@@ -3321,10 +4066,14 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelectedInSplit ? const Color(0xFF54C5F8).withOpacity(0.14) : const Color(0x0FFFFFFF),
+          color: isSelectedInSplit
+              ? const Color(0xFF54C5F8).withOpacity(0.14)
+              : const Color(0x0FFFFFFF),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isSelectedInSplit ? const Color(0xFF54C5F8).withOpacity(0.65) : const Color(0x1AFFFFFF),
+            color: isSelectedInSplit
+                ? const Color(0xFF54C5F8).withOpacity(0.65)
+                : const Color(0x1AFFFFFF),
             width: isSelectedInSplit ? 1.5 : 1.0,
           ),
         ),
@@ -3345,9 +4094,11 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: BoxDecoration(
                         color: const Color(0xFF0D0F18),
                         shape: BoxShape.circle,
-                        border: Border.all(color: const Color(0xFFFFD700), width: 1.2),
+                        border: Border.all(
+                            color: const Color(0xFFFFD700), width: 1.2),
                       ),
-                      child: const Icon(LucideIcons.terminal, size: 9, color: Color(0xFFFFD700)),
+                      child: const Icon(LucideIcons.terminal,
+                          size: 9, color: Color(0xFFFFD700)),
                     ),
                   ),
                 if (c.isOnline)
@@ -3360,7 +4111,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: BoxDecoration(
                         color: const Color(0xFF4ADE80),
                         shape: BoxShape.circle,
-                        border: Border.all(color: const Color(0xFF09090B), width: 1.5),
+                        border: Border.all(
+                            color: const Color(0xFF09090B), width: 1.5),
                       ),
                     ),
                   ),
@@ -3391,11 +4143,16 @@ class _ChatScreenState extends State<ChatScreen> {
                             if (c.isAiAssistant) ...[
                               const SizedBox(width: 6),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 5, vertical: 1.5),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFFFD700).withOpacity(0.18),
+                                  color:
+                                      const Color(0xFFFFD700).withOpacity(0.18),
                                   borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.55), width: 0.8),
+                                  border: Border.all(
+                                      color: const Color(0xFFFFD700)
+                                          .withOpacity(0.55),
+                                      width: 0.8),
                                 ),
                                 child: const Text(
                                   'SERVER AI',
@@ -3430,9 +4187,13 @@ class _ChatScreenState extends State<ChatScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.inter(
-                            color: c.unreadCount > 0 ? const Color(0xFFDDDDFF) : const Color(0xFF888899),
+                            color: c.unreadCount > 0
+                                ? const Color(0xFFDDDDFF)
+                                : const Color(0xFF888899),
                             fontSize: 12,
-                            fontWeight: c.unreadCount > 0 ? FontWeight.w500 : FontWeight.w400,
+                            fontWeight: c.unreadCount > 0
+                                ? FontWeight.w500
+                                : FontWeight.w400,
                           ),
                         ),
                       ),
@@ -3487,7 +4248,8 @@ class _ChatScreenState extends State<ChatScreen> {
               Expanded(
                 child: ListView.builder(
                   controller: _messagesScrollCtrl,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   itemCount: c.messages.length + 1,
                   itemBuilder: (context, index) {
                     // Render "Today" capsule divider in the middle
@@ -3500,11 +4262,13 @@ class _ChatScreenState extends State<ChatScreen> {
                             child: BackdropFilter(
                               filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 5),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.10),
                                   borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: Colors.white.withOpacity(0.18)),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.18)),
                                 ),
                                 child: Text(
                                   'Today',
@@ -3565,7 +4329,8 @@ class _ChatScreenState extends State<ChatScreen> {
           fit: BoxFit.cover,
           width: double.infinity,
           height: double.infinity,
-          errorBuilder: (_, __, ___) => Container(color: const Color(0xFF07080A)),
+          errorBuilder: (_, __, ___) =>
+              Container(color: const Color(0xFF07080A)),
         );
       }
 
@@ -3592,15 +4357,18 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           if (wallpaper.blur > 0.1)
             BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: wallpaper.blur, sigmaY: wallpaper.blur),
+              filter: ImageFilter.blur(
+                  sigmaX: wallpaper.blur, sigmaY: wallpaper.blur),
               child: const SizedBox.expand(),
             ),
           Container(
-            color: Colors.black.withOpacity((1.0 - wallpaper.opacity).clamp(0.0, 0.95)),
+            color: Colors.black
+                .withOpacity((1.0 - wallpaper.opacity).clamp(0.0, 0.95)),
           ),
         ],
       );
-    } else if (wallpaper.type == 'gradient' && wallpaper.gradientColors != null) {
+    } else if (wallpaper.type == 'gradient' &&
+        wallpaper.gradientColors != null) {
       return Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -3622,124 +4390,128 @@ class _ChatScreenState extends State<ChatScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withOpacity(0.20), width: 1.2),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withOpacity(0.18),
-                  Colors.white.withOpacity(0.06),
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.25),
-                  blurRadius: 18,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                SpringButton(
-                  onTap: () => _selectConversation(null),
-                  child: const Padding(
-                    padding: EdgeInsets.all(4),
-                    child: Icon(LucideIcons.chevronLeft, size: 22, color: Colors.white),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: SpringButton(
-                    onTap: () => _navigateToContactInfo(c),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 19,
-                          backgroundImage: NetworkImage(c.avatarUrl),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                c.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              Text(
-                                'last seen today at 23:18',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.65),
-                                  fontSize: 10.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                SpringButton(
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Starting video call with ${c.name}...')),
-                    );
-                  },
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 5),
-                    child: Icon(LucideIcons.video, size: 19, color: Colors.white),
-                  ),
-                ),
-                SpringButton(
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Starting voice call with ${c.name}...')),
-                    );
-                  },
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 5),
-                    child: Icon(LucideIcons.phone, size: 19, color: Colors.white),
-                  ),
-                ),
-                SpringButton(
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Search active')),
-                    );
-                  },
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 5),
-                    child: Icon(LucideIcons.search, size: 19, color: Colors.white),
-                  ),
-                ),
-                SpringButton(
-                  onTap: () => _openThreeDotsMenu(c),
-                  child: const Padding(
-                    padding: EdgeInsets.only(left: 3, right: 3),
-                    child: Icon(LucideIcons.moreVertical, size: 19, color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withOpacity(0.20), width: 1.2),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white.withOpacity(0.18),
+              Colors.white.withOpacity(0.06),
+            ],
           ),
-        );
-      }
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.25),
+              blurRadius: 18,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            SpringButton(
+              onTap: () => _selectConversation(null),
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(LucideIcons.chevronLeft,
+                    size: 22, color: Colors.white),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: SpringButton(
+                onTap: () => _navigateToContactInfo(c),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 19,
+                      backgroundImage: NetworkImage(c.avatarUrl),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            c.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            'last seen today at 23:18',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.65),
+                              fontSize: 10.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            SpringButton(
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                      content: Text('Starting video call with ${c.name}...')),
+                );
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 5),
+                child: Icon(LucideIcons.video, size: 19, color: Colors.white),
+              ),
+            ),
+            SpringButton(
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                      content: Text('Starting voice call with ${c.name}...')),
+                );
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 5),
+                child: Icon(LucideIcons.phone, size: 19, color: Colors.white),
+              ),
+            ),
+            SpringButton(
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Search active')),
+                );
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 5),
+                child: Icon(LucideIcons.search, size: 19, color: Colors.white),
+              ),
+            ),
+            SpringButton(
+              onTap: () => _openThreeDotsMenu(c),
+              child: const Padding(
+                padding: EdgeInsets.only(left: 3, right: 3),
+                child: Icon(LucideIcons.moreVertical,
+                    size: 19, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   // Multi-Select Action Top Bar (Liquid Glass Glow)
   Widget _buildMultiSelectTopBar(ChatConversation c) {
@@ -3751,7 +4523,8 @@ class _ChatScreenState extends State<ChatScreen> {
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.10),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.45), width: 1.2),
+          border: Border.all(
+              color: const Color(0xFF54C5F8).withOpacity(0.45), width: 1.2),
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -3894,7 +4667,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         : (msg.text.isNotEmpty ? msg.text : 'Media attachment'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.7), fontSize: 12),
                   ),
                 ],
               ),
@@ -3968,10 +4742,14 @@ class _ChatScreenState extends State<ChatScreen> {
                     width: 22,
                     height: 22,
                     decoration: BoxDecoration(
-                      color: isSelected ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.08),
+                      color: isSelected
+                          ? const Color(0xFF54C5F8)
+                          : Colors.white.withOpacity(0.08),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: isSelected ? const Color(0xFF54C5F8) : Colors.white38,
+                        color: isSelected
+                            ? const Color(0xFF54C5F8)
+                            : Colors.white38,
                         width: 1.5,
                       ),
                       boxShadow: isSelected
@@ -3985,14 +4763,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     child: isSelected
                         ? const Center(
-                            child: Icon(LucideIcons.check, size: 14, color: Colors.black),
+                            child: Icon(LucideIcons.check,
+                                size: 14, color: Colors.black),
                           )
                         : null,
                   ),
                 ),
                 Expanded(
                   child: Align(
-                    alignment: msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                    alignment:
+                        msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
                     child: bubbleWidget,
                   ),
                 ),
@@ -4015,7 +4795,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFFFF5252).withOpacity(0.2),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFFF5252).withOpacity(0.6)),
+                  border: Border.all(
+                      color: const Color(0xFFFF5252).withOpacity(0.6)),
                   boxShadow: [
                     BoxShadow(
                       color: const Color(0xFFFF5252).withOpacity(0.3),
@@ -4023,7 +4804,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ],
                 ),
-                child: const Icon(LucideIcons.trash2, size: 18, color: Color(0xFFFF5252)),
+                child: const Icon(LucideIcons.trash2,
+                    size: 18, color: Color(0xFFFF5252)),
               ),
             ),
             // Swipe Left (endToStart) -> Reply
@@ -4035,7 +4817,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF54C5F8).withOpacity(0.2),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.6)),
+                  border: Border.all(
+                      color: const Color(0xFF54C5F8).withOpacity(0.6)),
                   boxShadow: [
                     BoxShadow(
                       color: const Color(0xFF54C5F8).withOpacity(0.3),
@@ -4043,7 +4826,8 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ],
                 ),
-                child: const Icon(LucideIcons.reply, size: 18, color: Color(0xFF54C5F8)),
+                child: const Icon(LucideIcons.reply,
+                    size: 18, color: Color(0xFF54C5F8)),
               ),
             ),
             confirmDismiss: (direction) async {
@@ -4077,7 +4861,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
 
     return Column(
-      crossAxisAlignment: msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment:
+          msg.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -4123,7 +4908,8 @@ class _ChatScreenState extends State<ChatScreen> {
               if (msg.replyingTo != null) ...[
                 Container(
                   margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(10),
@@ -4174,17 +4960,20 @@ class _ChatScreenState extends State<ChatScreen> {
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.08),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white.withOpacity(0.15)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.15)),
                           ),
                           child: Row(
                             children: [
                               Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF54C5F8).withOpacity(0.2),
+                                  color:
+                                      const Color(0xFF54C5F8).withOpacity(0.2),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(LucideIcons.fileText, color: Color(0xFF54C5F8), size: 24),
+                                child: const Icon(LucideIcons.fileText,
+                                    color: Color(0xFF54C5F8), size: 24),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -4192,20 +4981,28 @@ class _ChatScreenState extends State<ChatScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      msg.mediaCaption?.isNotEmpty == true ? msg.mediaCaption! : 'Project_Doc.pdf',
+                                      msg.mediaCaption?.isNotEmpty == true
+                                          ? msg.mediaCaption!
+                                          : 'Project_Doc.pdf',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold),
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
                                       '2.4 MB · PDF Document',
-                                      style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 11),
+                                      style: TextStyle(
+                                          color: Colors.white.withOpacity(0.6),
+                                          fontSize: 11),
                                     ),
                                   ],
                                 ),
                               ),
-                              const Icon(LucideIcons.download, color: Colors.white70, size: 18),
+                              const Icon(LucideIcons.download,
+                                  color: Colors.white70, size: 18),
                             ],
                           ),
                         )
@@ -4220,7 +5017,8 @@ class _ChatScreenState extends State<ChatScreen> {
                               height: 140,
                               color: Colors.white10,
                               child: const Center(
-                                child: Icon(LucideIcons.image, color: Colors.white38, size: 36),
+                                child: Icon(LucideIcons.image,
+                                    color: Colors.white38, size: 36),
                               ),
                             ),
                           ),
@@ -4238,7 +5036,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                 height: 160,
                                 color: Colors.black26,
                                 child: const Center(
-                                  child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Color(0xFF54C5F8))),
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation(
+                                          Color(0xFF54C5F8))),
                                 ),
                               );
                             },
@@ -4246,7 +5047,8 @@ class _ChatScreenState extends State<ChatScreen> {
                               height: 140,
                               color: Colors.white10,
                               child: const Center(
-                                child: Icon(LucideIcons.image, color: Colors.white38, size: 36),
+                                child: Icon(LucideIcons.image,
+                                    color: Colors.white38, size: 36),
                               ),
                             ),
                           ),
@@ -4259,9 +5061,11 @@ class _ChatScreenState extends State<ChatScreen> {
                           decoration: BoxDecoration(
                             color: Colors.black.withOpacity(0.55),
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white.withOpacity(0.4)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.4)),
                           ),
-                          child: const Icon(LucideIcons.play, color: Colors.white, size: 24),
+                          child: const Icon(LucideIcons.play,
+                              color: Colors.white, size: 24),
                         ),
 
                       // Video duration chip
@@ -4270,12 +5074,17 @@ class _ChatScreenState extends State<ChatScreen> {
                           bottom: 8,
                           right: 8,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.black.withOpacity(0.7),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: const Text('0:18', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600)),
+                            child: const Text('0:18',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600)),
                           ),
                         ),
 
@@ -4300,7 +5109,9 @@ class _ChatScreenState extends State<ChatScreen> {
                                             value: msg.uploadProgress,
                                             strokeWidth: 3.5,
                                             backgroundColor: Colors.white24,
-                                            valueColor: const AlwaysStoppedAnimation(Color(0xFF54C5F8)),
+                                            valueColor:
+                                                const AlwaysStoppedAnimation(
+                                                    Color(0xFF54C5F8)),
                                           ),
                                         ),
                                         Text(
@@ -4316,7 +5127,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                     const SizedBox(height: 6),
                                     Text(
                                       'Uploading media...',
-                                      style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 11, fontWeight: FontWeight.w500),
+                                      style: TextStyle(
+                                          color: Colors.white.withOpacity(0.85),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500),
                                     ),
                                   ],
                                 ),
@@ -4327,18 +5141,23 @@ class _ChatScreenState extends State<ChatScreen> {
                     ],
                   ),
                 ),
-                if (msg.mediaCaption != null && msg.mediaCaption!.isNotEmpty && msg.mediaType != 'document') ...[
+                if (msg.mediaCaption != null &&
+                    msg.mediaCaption!.isNotEmpty &&
+                    msg.mediaType != 'document') ...[
                   const SizedBox(height: 6),
                   Text(
                     msg.mediaCaption!,
-                    style: GoogleFonts.inter(color: Colors.white, fontSize: 13.5, height: 1.3),
+                    style: GoogleFonts.inter(
+                        color: Colors.white, fontSize: 13.5, height: 1.3),
                   ),
                 ],
                 const SizedBox(height: 4),
               ],
 
               // Message Body Text (if not redundant with caption)
-              if (msg.text.isNotEmpty && msg.text != msg.mediaCaption && msg.mediaType != 'document') ...[
+              if (msg.text.isNotEmpty &&
+                  msg.text != msg.mediaCaption &&
+                  msg.mediaType != 'document') ...[
                 Text(
                   msg.text,
                   style: GoogleFonts.inter(
@@ -4379,12 +5198,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   if (msg.isStarred)
                     const Padding(
                       padding: EdgeInsets.only(right: 4),
-                      child: Icon(LucideIcons.star, size: 11, color: Color(0xFFFFD700)),
+                      child: Icon(LucideIcons.star,
+                          size: 11, color: Color(0xFFFFD700)),
                     ),
                   if (msg.isPinned)
                     const Padding(
                       padding: EdgeInsets.only(right: 4),
-                      child: Icon(LucideIcons.pin, size: 11, color: Color(0xFF54C5F8)),
+                      child: Icon(LucideIcons.pin,
+                          size: 11, color: Color(0xFF54C5F8)),
                     ),
                   Text(
                     msg.time,
@@ -4408,7 +5229,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       Text(
                         '...',
                         style: TextStyle(
-                          color: msg.isDelivered ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.5),
+                          color: msg.isDelivered
+                              ? const Color(0xFF54C5F8)
+                              : Colors.white.withOpacity(0.5),
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 0.8,
@@ -4435,11 +5258,15 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(msg.reactions.join(' '), style: const TextStyle(fontSize: 12)),
+                  Text(msg.reactions.join(' '),
+                      style: const TextStyle(fontSize: 12)),
                   const SizedBox(width: 4),
                   Text(
                     '${msg.reactions.length}',
-                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -4465,7 +5292,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(26),
-                  border: Border.all(color: Colors.white.withOpacity(0.22), width: 1.2),
+                  border: Border.all(
+                      color: Colors.white.withOpacity(0.22), width: 1.2),
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -4491,7 +5319,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       },
                       child: Padding(
                         padding: const EdgeInsets.all(6),
-                        child: Icon(LucideIcons.paperclip, size: 20, color: Colors.white.withOpacity(0.85)),
+                        child: Icon(LucideIcons.paperclip,
+                            size: 20, color: Colors.white.withOpacity(0.85)),
                       ),
                     ),
                     // Emoji icon
@@ -4501,7 +5330,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       },
                       child: Padding(
                         padding: const EdgeInsets.all(6),
-                        child: Icon(LucideIcons.smile, size: 20, color: Colors.white.withOpacity(0.85)),
+                        child: Icon(LucideIcons.smile,
+                            size: 20, color: Colors.white.withOpacity(0.85)),
                       ),
                     ),
                     const SizedBox(width: 4),
@@ -4509,17 +5339,21 @@ class _ChatScreenState extends State<ChatScreen> {
                     Expanded(
                       child: TextField(
                         controller: _msgCtrl,
-                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 14),
                         cursorColor: const Color(0xFF54C5F8),
                         decoration: InputDecoration(
                           hintText: 'Type a message',
-                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 14),
+                          hintStyle: TextStyle(
+                              color: Colors.white.withOpacity(0.55),
+                              fontSize: 14),
                           filled: false,
                           fillColor: Colors.transparent,
                           border: InputBorder.none,
                           enabledBorder: InputBorder.none,
                           focusedBorder: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 12),
                         ),
                         onSubmitted: (_) => _sendMessage(),
                       ),
@@ -4536,7 +5370,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   ? _sendMessage
                   : () {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Audio note recording started...')),
+                        const SnackBar(
+                            content: Text('Audio note recording started...')),
                       );
                     },
               child: Container(
@@ -4559,7 +5394,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: _isTyping ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.25),
+                    color: _isTyping
+                        ? const Color(0xFF54C5F8)
+                        : Colors.white.withOpacity(0.25),
                     width: 1.2,
                   ),
                   boxShadow: [
@@ -4597,7 +5434,8 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Container(
             padding: const EdgeInsets.all(22),
             decoration: BoxDecoration(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(24)),
               border: Border.all(color: Colors.white.withOpacity(0.25)),
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -4616,7 +5454,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Container(
                     width: 36,
                     height: 4,
-                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                    decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
                 const SizedBox(height: 18),
@@ -4665,7 +5505,8 @@ class _ChatScreenState extends State<ChatScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: const Color(0xFF54C5F8).withOpacity(0.15),
-              border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+              border:
+                  Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
               boxShadow: [
                 BoxShadow(
                   color: const Color(0xFF54C5F8).withOpacity(0.12),
@@ -4690,7 +5531,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ── Native Internal Device Storage Picker (Camera / Gallery / Video / Docs) ──
-  Future<void> _pickFromStorage({String mediaType = 'image', bool isCamera = false}) async {
+  Future<void> _pickFromStorage(
+      {String mediaType = 'image', bool isCamera = false}) async {
     try {
       PickedMediaResult? result;
       if (isCamera) {
@@ -4756,7 +5598,8 @@ class _MediaEditorSheet extends StatefulWidget {
   final String mediaUrl;
   final String mediaTitle;
   final String? initialCaption;
-  final Function(String type, String url, String? caption, String filterName) onSend;
+  final Function(String type, String url, String? caption, String filterName)
+      onSend;
 
   const _MediaEditorSheet({
     required this.mediaType,
@@ -4783,7 +5626,13 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
     'Noir Mono': const ColorFilter.mode(Colors.black, BlendMode.saturation),
   };
 
-  final List<String> _badges = ['🔥 Fire', '🚀 Launch', '✨ Clean', '🐞 Bug', '✅ Fixed'];
+  final List<String> _badges = [
+    '🔥 Fire',
+    '🚀 Launch',
+    '✨ Clean',
+    '🐞 Bug',
+    '✅ Fixed'
+  ];
 
   @override
   void initState() {
@@ -4831,7 +5680,8 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                       shape: BoxShape.circle,
                       color: Colors.white.withOpacity(0.1),
                     ),
-                    child: const Icon(LucideIcons.x, size: 18, color: Colors.white),
+                    child: const Icon(LucideIcons.x,
+                        size: 18, color: Colors.white),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -4848,11 +5698,13 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: const Color(0xFF54C5F8).withOpacity(0.18),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.35)),
+                    border: Border.all(
+                        color: const Color(0xFF54C5F8).withOpacity(0.35)),
                   ),
                   child: Text(
                     widget.mediaType.toUpperCase(),
@@ -4885,21 +5737,30 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                               Container(
                                 padding: const EdgeInsets.all(20),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF54C5F8).withOpacity(0.15),
+                                  color:
+                                      const Color(0xFF54C5F8).withOpacity(0.15),
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: const Color(0xFF54C5F8).withOpacity(0.3)),
+                                  border: Border.all(
+                                      color: const Color(0xFF54C5F8)
+                                          .withOpacity(0.3)),
                                 ),
-                                child: const Icon(LucideIcons.fileText, color: Color(0xFF54C5F8), size: 48),
+                                child: const Icon(LucideIcons.fileText,
+                                    color: Color(0xFF54C5F8), size: 48),
                               ),
                               const SizedBox(height: 14),
                               Text(
                                 widget.mediaTitle,
-                                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 '2.4 MB · Project Document',
-                                style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
+                                style: TextStyle(
+                                    color: Colors.white.withOpacity(0.6),
+                                    fontSize: 12),
                               ),
                             ],
                           ),
@@ -4908,14 +5769,17 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                     else
                       ColorFiltered(
                         colorFilter: _filters[_selectedFilter] ??
-                            const ColorFilter.mode(Colors.transparent, BlendMode.dst),
+                            const ColorFilter.mode(
+                                Colors.transparent, BlendMode.dst),
                         child: widget.mediaUrl.startsWith('data:image')
                             ? Image.memory(
                                 base64Decode(widget.mediaUrl.split(',').last),
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => Container(
                                   color: Colors.black26,
-                                  child: const Center(child: Icon(LucideIcons.image, size: 48, color: Colors.white38)),
+                                  child: const Center(
+                                      child: Icon(LucideIcons.image,
+                                          size: 48, color: Colors.white38)),
                                 ),
                               )
                             : Image.network(
@@ -4923,7 +5787,9 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) => Container(
                                   color: Colors.black26,
-                                  child: const Center(child: Icon(LucideIcons.image, size: 48, color: Colors.white38)),
+                                  child: const Center(
+                                      child: Icon(LucideIcons.image,
+                                          size: 48, color: Colors.white38)),
                                 ),
                               ),
                       ),
@@ -4935,9 +5801,11 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.55),
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white.withOpacity(0.3)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.3)),
                         ),
-                        child: const Icon(LucideIcons.play, color: Colors.white, size: 32),
+                        child: const Icon(LucideIcons.play,
+                            color: Colors.white, size: 32),
                       ),
 
                     // Sticker / Badge Overlay
@@ -4946,11 +5814,13 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                         top: 14,
                         right: 14,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
                             color: Colors.black.withOpacity(0.75),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF54C5F8), width: 1.2),
+                            border: Border.all(
+                                color: const Color(0xFF54C5F8), width: 1.2),
                             boxShadow: [
                               BoxShadow(
                                 color: const Color(0xFF54C5F8).withOpacity(0.3),
@@ -4960,7 +5830,10 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                           ),
                           child: Text(
                             _selectedBadge!,
-                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold),
                           ),
                         ),
                       ),
@@ -4983,21 +5856,30 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                       child: SpringButton(
                         onTap: () => setState(() => _selectedFilter = fName),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
-                            color: isSelected ? const Color(0xFF54C5F8).withOpacity(0.2) : Colors.white.withOpacity(0.06),
+                            color: isSelected
+                                ? const Color(0xFF54C5F8).withOpacity(0.2)
+                                : Colors.white.withOpacity(0.06),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: isSelected ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.15),
+                              color: isSelected
+                                  ? const Color(0xFF54C5F8)
+                                  : Colors.white.withOpacity(0.15),
                               width: 1.2,
                             ),
                           ),
                           child: Text(
                             fName,
                             style: TextStyle(
-                              color: isSelected ? const Color(0xFF54C5F8) : Colors.white70,
+                              color: isSelected
+                                  ? const Color(0xFF54C5F8)
+                                  : Colors.white70,
                               fontSize: 11,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.w500,
                             ),
                           ),
                         ),
@@ -5025,20 +5907,29 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                         });
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFF54C5F8).withOpacity(0.2) : Colors.white.withOpacity(0.06),
+                          color: isSelected
+                              ? const Color(0xFF54C5F8).withOpacity(0.2)
+                              : Colors.white.withOpacity(0.06),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: isSelected ? const Color(0xFF54C5F8) : Colors.white.withOpacity(0.12),
+                            color: isSelected
+                                ? const Color(0xFF54C5F8)
+                                : Colors.white.withOpacity(0.12),
                           ),
                         ),
                         child: Text(
                           bName,
                           style: TextStyle(
-                            color: isSelected ? const Color(0xFF54C5F8) : Colors.white70,
+                            color: isSelected
+                                ? const Color(0xFF54C5F8)
+                                : Colors.white70,
                             fontSize: 11,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
                           ),
                         ),
                       ),
@@ -5063,15 +5954,19 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                     ),
                     child: TextField(
                       controller: _captionCtrl,
-                      style: const TextStyle(color: Colors.white, fontSize: 13.5),
+                      style:
+                          const TextStyle(color: Colors.white, fontSize: 13.5),
                       cursorColor: const Color(0xFF54C5F8),
                       decoration: InputDecoration(
                         hintText: 'Add a caption...',
-                        hintStyle: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13.5),
+                        hintStyle: TextStyle(
+                            color: Colors.white.withOpacity(0.4),
+                            fontSize: 13.5),
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
                   ),
@@ -5103,7 +5998,8 @@ class _MediaEditorSheetState extends State<_MediaEditorSheet> {
                       ],
                     ),
                     child: const Center(
-                      child: Icon(LucideIcons.send, size: 20, color: Colors.black),
+                      child:
+                          Icon(LucideIcons.send, size: 20, color: Colors.black),
                     ),
                   ),
                 ),
@@ -5188,7 +6084,8 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
           fit: BoxFit.cover,
           width: double.infinity,
           height: double.infinity,
-          errorBuilder: (_, __, ___) => Container(color: const Color(0xFF07080A)),
+          errorBuilder: (_, __, ___) =>
+              Container(color: const Color(0xFF07080A)),
         );
       }
 
@@ -5278,12 +6175,16 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                       children: [
                         const Text(
                           'Adjust Wallpaper',
-                          style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           'Target chat: ${widget.conv.name}',
-                          style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 12),
+                          style: const TextStyle(
+                              color: Color(0xFF54C5F8), fontSize: 12),
                         ),
                       ],
                     ),
@@ -5295,7 +6196,8 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                           shape: BoxShape.circle,
                           color: Colors.white.withOpacity(0.08),
                         ),
-                        child: const Icon(LucideIcons.x, size: 18, color: Colors.white70),
+                        child: const Icon(LucideIcons.x,
+                            size: 18, color: Colors.white70),
                       ),
                     ),
                   ],
@@ -5319,8 +6221,12 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                           onPanUpdate: isImageType
                               ? (details) {
                                   setState(() {
-                                    _alignmentX = (_alignmentX + details.delta.dx / 100.0).clamp(-1.8, 1.8);
-                                    _alignmentY = (_alignmentY + details.delta.dy / 85.0).clamp(-1.8, 1.8);
+                                    _alignmentX =
+                                        (_alignmentX + details.delta.dx / 100.0)
+                                            .clamp(-1.8, 1.8);
+                                    _alignmentY =
+                                        (_alignmentY + details.delta.dy / 85.0)
+                                            .clamp(-1.8, 1.8);
                                   });
                                 }
                               : null,
@@ -5339,8 +6245,10 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                                 Align(
                                   alignment: Alignment.centerLeft,
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                                    constraints: const BoxConstraints(maxWidth: 240),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 9),
+                                    constraints:
+                                        const BoxConstraints(maxWidth: 240),
                                     decoration: BoxDecoration(
                                       gradient: LinearGradient(
                                         colors: [
@@ -5353,11 +6261,14 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                                         topRight: Radius.circular(16),
                                         bottomRight: Radius.circular(16),
                                       ),
-                                      border: Border.all(color: Colors.white.withOpacity(0.18)),
+                                      border: Border.all(
+                                          color:
+                                              Colors.white.withOpacity(0.18)),
                                     ),
                                     child: const Text(
                                       'How does the new wallpaper look behind our code chat?',
-                                      style: TextStyle(color: Colors.white, fontSize: 12),
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 12),
                                     ),
                                   ),
                                 ),
@@ -5366,8 +6277,10 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                                 Align(
                                   alignment: Alignment.centerRight,
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                                    constraints: const BoxConstraints(maxWidth: 240),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 9),
+                                    constraints:
+                                        const BoxConstraints(maxWidth: 240),
                                     decoration: BoxDecoration(
                                       gradient: LinearGradient(
                                         colors: [
@@ -5380,11 +6293,13 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                                         topRight: Radius.circular(16),
                                         bottomLeft: Radius.circular(16),
                                       ),
-                                      border: Border.all(color: Colors.white.withOpacity(0.3)),
+                                      border: Border.all(
+                                          color: Colors.white.withOpacity(0.3)),
                                     ),
                                     child: const Text(
                                       'Crystal clear! The liquid glass shade is perfect 🔥',
-                                      style: TextStyle(color: Colors.white, fontSize: 12),
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 12),
                                     ),
                                   ),
                                 ),
@@ -5399,20 +6314,27 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                             top: 8,
                             right: 8,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
                                 color: Colors.black.withOpacity(0.55),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.white.withOpacity(0.15)),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.15)),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(LucideIcons.move, size: 11, color: Colors.white.withOpacity(0.85)),
+                                  Icon(LucideIcons.move,
+                                      size: 11,
+                                      color: Colors.white.withOpacity(0.85)),
                                   const SizedBox(width: 4),
                                   Text(
                                     'Drag to Pan',
-                                    style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 10, fontWeight: FontWeight.w600),
+                                    style: TextStyle(
+                                        color: Colors.white.withOpacity(0.85),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600),
                                   ),
                                 ],
                               ),
@@ -5442,7 +6364,9 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                             child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               decoration: BoxDecoration(
-                                color: _activeTab == 0 ? const Color(0xFF54C5F8) : Colors.transparent,
+                                color: _activeTab == 0
+                                    ? const Color(0xFF54C5F8)
+                                    : Colors.transparent,
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Row(
@@ -5451,13 +6375,17 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                                   Icon(
                                     LucideIcons.move,
                                     size: 14,
-                                    color: _activeTab == 0 ? Colors.black : Colors.white70,
+                                    color: _activeTab == 0
+                                        ? Colors.black
+                                        : Colors.white70,
                                   ),
                                   const SizedBox(width: 6),
                                   Text(
                                     'Size & Placement',
                                     style: TextStyle(
-                                      color: _activeTab == 0 ? Colors.black : Colors.white70,
+                                      color: _activeTab == 0
+                                          ? Colors.black
+                                          : Colors.white70,
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -5473,7 +6401,9 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                             child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               decoration: BoxDecoration(
-                                color: _activeTab == 1 ? const Color(0xFF54C5F8) : Colors.transparent,
+                                color: _activeTab == 1
+                                    ? const Color(0xFF54C5F8)
+                                    : Colors.transparent,
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Row(
@@ -5482,13 +6412,17 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                                   Icon(
                                     LucideIcons.sliders,
                                     size: 14,
-                                    color: _activeTab == 1 ? Colors.black : Colors.white70,
+                                    color: _activeTab == 1
+                                        ? Colors.black
+                                        : Colors.white70,
                                   ),
                                   const SizedBox(width: 6),
                                   Text(
                                     'Dimming & Blur',
                                     style: TextStyle(
-                                      color: _activeTab == 1 ? Colors.black : Colors.white70,
+                                      color: _activeTab == 1
+                                          ? Colors.black
+                                          : Colors.white70,
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -5512,14 +6446,22 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                       children: [
                         Row(
                           children: [
-                            const Icon(LucideIcons.zoomIn, size: 15, color: Color(0xFF54C5F8)),
+                            const Icon(LucideIcons.zoomIn,
+                                size: 15, color: Color(0xFF54C5F8)),
                             const SizedBox(width: 8),
-                            const Text('Wallpaper Size (Zoom)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                            const Text('Wallpaper Size (Zoom)',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
                           ],
                         ),
                         Text(
                           '${(_scale * 100).toInt()}%',
-                          style: const TextStyle(color: Color(0xFF54C5F8), fontSize: 12, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              color: Color(0xFF54C5F8),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -5546,18 +6488,29 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                         return SpringButton(
                           onTap: () => setState(() => _scale = preset),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: isSel ? const Color(0xFF54C5F8).withOpacity(0.2) : Colors.white.withOpacity(0.06),
+                              color: isSel
+                                  ? const Color(0xFF54C5F8).withOpacity(0.2)
+                                  : Colors.white.withOpacity(0.06),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: isSel ? const Color(0xFF54C5F8) : Colors.white12),
+                              border: Border.all(
+                                  color: isSel
+                                      ? const Color(0xFF54C5F8)
+                                      : Colors.white12),
                             ),
                             child: Text(
-                              preset == 0.75 ? 'Fit' : '${(preset * 100).toInt()}%',
+                              preset == 0.75
+                                  ? 'Fit'
+                                  : '${(preset * 100).toInt()}%',
                               style: TextStyle(
-                                color: isSel ? const Color(0xFF54C5F8) : Colors.white70,
+                                color: isSel
+                                    ? const Color(0xFF54C5F8)
+                                    : Colors.white70,
                                 fontSize: 11,
-                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                                fontWeight:
+                                    isSel ? FontWeight.bold : FontWeight.normal,
                               ),
                             ),
                           ),
@@ -5573,11 +6526,17 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                       children: [
                         Row(
                           children: [
-                            const Icon(LucideIcons.arrowLeft, size: 14, color: Color(0xFF54C5F8)),
+                            const Icon(LucideIcons.arrowLeft,
+                                size: 14, color: Color(0xFF54C5F8)),
                             const SizedBox(width: 4),
-                            const Icon(LucideIcons.arrowRight, size: 14, color: Color(0xFF54C5F8)),
+                            const Icon(LucideIcons.arrowRight,
+                                size: 14, color: Color(0xFF54C5F8)),
                             const SizedBox(width: 8),
-                            const Text('Horizontal (Left / Right)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                            const Text('Horizontal (Left / Right)',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
                           ],
                         ),
                         Text(
@@ -5586,7 +6545,10 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                               : _alignmentX < 0
                                   ? '${(-_alignmentX * 100).toInt()}% Left'
                                   : '${(_alignmentX * 100).toInt()}% Right',
-                          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -5611,11 +6573,17 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                       children: [
                         Row(
                           children: [
-                            const Icon(LucideIcons.arrowUp, size: 14, color: Color(0xFF54C5F8)),
+                            const Icon(LucideIcons.arrowUp,
+                                size: 14, color: Color(0xFF54C5F8)),
                             const SizedBox(width: 4),
-                            const Icon(LucideIcons.arrowDown, size: 14, color: Color(0xFF54C5F8)),
+                            const Icon(LucideIcons.arrowDown,
+                                size: 14, color: Color(0xFF54C5F8)),
                             const SizedBox(width: 8),
-                            const Text('Vertical (Top / Down)', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                            const Text('Vertical (Top / Down)',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
                           ],
                         ),
                         Text(
@@ -5624,7 +6592,10 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                               : _alignmentY < 0
                                   ? '${(-_alignmentY * 100).toInt()}% Top'
                                   : '${(_alignmentY * 100).toInt()}% Down',
-                          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -5647,43 +6618,61 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
 
                     // 4. Directional Nudge Pad & Center Reset
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.04),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white.withOpacity(0.08)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.08)),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text(
                             'Quick Nudge & Reset',
-                            style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600),
                           ),
                           Row(
                             children: [
-                              _buildNudgeBtn(LucideIcons.arrowLeft, () => _nudge(dx: -0.1)),
+                              _buildNudgeBtn(LucideIcons.arrowLeft,
+                                  () => _nudge(dx: -0.1)),
                               const SizedBox(width: 6),
-                              _buildNudgeBtn(LucideIcons.arrowUp, () => _nudge(dy: -0.1)),
+                              _buildNudgeBtn(
+                                  LucideIcons.arrowUp, () => _nudge(dy: -0.1)),
                               const SizedBox(width: 6),
-                              _buildNudgeBtn(LucideIcons.arrowDown, () => _nudge(dy: 0.1)),
+                              _buildNudgeBtn(
+                                  LucideIcons.arrowDown, () => _nudge(dy: 0.1)),
                               const SizedBox(width: 6),
-                              _buildNudgeBtn(LucideIcons.arrowRight, () => _nudge(dx: 0.1)),
+                              _buildNudgeBtn(LucideIcons.arrowRight,
+                                  () => _nudge(dx: 0.1)),
                               const SizedBox(width: 10),
                               SpringButton(
                                 onTap: _resetPlacement,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
                                   decoration: BoxDecoration(
                                     color: Colors.white.withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.white.withOpacity(0.15)),
+                                    border: Border.all(
+                                        color: Colors.white.withOpacity(0.15)),
                                   ),
                                   child: Row(
                                     children: [
-                                      Icon(LucideIcons.rotateCcw, size: 12, color: Colors.white.withOpacity(0.9)),
+                                      Icon(LucideIcons.rotateCcw,
+                                          size: 12,
+                                          color: Colors.white.withOpacity(0.9)),
                                       const SizedBox(width: 4),
-                                      Text('Reset', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 11, fontWeight: FontWeight.bold)),
+                                      Text('Reset',
+                                          style: TextStyle(
+                                              color:
+                                                  Colors.white.withOpacity(0.9),
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold)),
                                     ],
                                   ),
                                 ),
@@ -5700,14 +6689,22 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                       children: [
                         Row(
                           children: [
-                            const Icon(LucideIcons.sunMedium, size: 16, color: Color(0xFF54C5F8)),
+                            const Icon(LucideIcons.sunMedium,
+                                size: 16, color: Color(0xFF54C5F8)),
                             const SizedBox(width: 8),
-                            const Text('Background Dimming', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                            const Text('Background Dimming',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
                           ],
                         ),
                         Text(
                           '${((1.0 - _opacity) * 100).toInt()}% Dark',
-                          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -5734,14 +6731,22 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                       children: [
                         Row(
                           children: [
-                            const Icon(LucideIcons.droplets, size: 16, color: Color(0xFF54C5F8)),
+                            const Icon(LucideIcons.droplets,
+                                size: 16, color: Color(0xFF54C5F8)),
                             const SizedBox(width: 8),
-                            const Text('Frosted Glass Blur', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                            const Text('Frosted Glass Blur',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
                           ],
                         ),
                         Text(
                           '${_blur.toStringAsFixed(1)} px',
-                          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -5793,7 +6798,10 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                     child: Center(
                       child: Text(
                         'Apply to ${widget.conv.name}',
-                        style: const TextStyle(color: Colors.black, fontSize: 14.5, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
@@ -5820,12 +6828,16 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.06),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white.withOpacity(0.12)),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.12)),
                           ),
                           child: const Center(
                             child: Text(
                               'Set for all chats',
-                              style: TextStyle(color: Colors.white70, fontSize: 12.5, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600),
                             ),
                           ),
                         ),
@@ -5834,7 +6846,10 @@ class _WallpaperAdjustSheetState extends State<_WallpaperAdjustSheet> {
                     const SizedBox(width: 10),
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: Text('Cancel', style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13)),
+                      child: Text('Cancel',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.55),
+                              fontSize: 13)),
                     ),
                   ],
                 ),

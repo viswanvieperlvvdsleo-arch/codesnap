@@ -1,0 +1,1 @@
+ C:\\codesnap\\.dart_tool\\flutter_build\\afbfd7dbb646430332fe33f4c11be607\\dart_build_result.json:  C:\\Users\\WHOME!~1\\flutter\\bin\\cache\\dart-sdk\\version C:\\codesnap\\.dart_tool\\package_config.json C:\\codesnap\\pubspec.yaml c:\\codesnap\\.dart_tool\\package_config.json
