@@ -331,6 +331,14 @@ class ChatService {
   static Future<void> deleteMessage(String messageId) async {
     final userId = SupabaseService.currentUserId;
     if (userId == null) throw const AuthException('Authentication required');
+    final message = await _client
+        .from(SupabaseService.tableMessages)
+        .select('sender_id,media_path')
+        .eq('id', messageId)
+        .maybeSingle();
+    if (message == null || message['sender_id']?.toString() != userId) {
+      throw StateError('Only the sender can delete this message for everyone.');
+    }
     final deleted = await _client
         .from(SupabaseService.tableMessages)
         .update({'deleted_at': DateTime.now().toUtc().toIso8601String()})
@@ -340,6 +348,17 @@ class ChatService {
         .maybeSingle();
     if (deleted == null) {
       throw StateError('Only the sender can delete this message for everyone.');
+    }
+    final mediaPath = message['media_path']?.toString();
+    if (mediaPath != null && mediaPath.isNotEmpty) {
+      try {
+        await _client.storage
+            .from(SupabaseService.bucketChatMedia)
+            .remove([mediaPath]);
+      } catch (_) {
+        // The message is already hidden for every participant. Storage cleanup
+        // can be retried independently if a stale object policy blocks it.
+      }
     }
   }
 

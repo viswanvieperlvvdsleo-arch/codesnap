@@ -26,16 +26,28 @@ class ContactInfoScreen extends StatefulWidget {
   final bool isOnline;
   final ChatWallpaperConfig? wallpaper;
   final VoidCallback? onBack;
+  final List<MediaItem> mediaItems;
+  final List<DocItem> docItems;
+  final List<LinkItem> linkItems;
+  final ValueChanged<String>? onShowInChat;
+  final Future<bool> Function(String messageId)? onDeleteMessage;
 
   const ContactInfoScreen({
     super.key,
     this.contactName = 'Alex Rivers',
-    this.contactAvatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80',
+    this.contactAvatar =
+        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80',
     this.contactHandle = '+1 (555) 382-9104',
-    this.contactBio = 'Building next-gen distributed mobile developer tools & zero-cost AI agents. 🚀',
+    this.contactBio =
+        'Building next-gen distributed mobile developer tools & zero-cost AI agents. 🚀',
     this.isOnline = true,
     this.wallpaper,
     this.onBack,
+    this.mediaItems = const [],
+    this.docItems = const [],
+    this.linkItems = const [],
+    this.onShowInChat,
+    this.onDeleteMessage,
   });
 
   @override
@@ -47,12 +59,30 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
   String _disappearingMessages = 'Off';
   bool _isStarred = false;
 
-  final List<String> _mediaThumbnails = const [
-    'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=300&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?w=300&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=300&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=300&auto=format&fit=crop&q=80',
-  ];
+  Widget _mediaThumbnail(MediaItem item) {
+    if (item.isVideo) {
+      return Container(
+        color: Colors.white.withOpacity(.08),
+        child: const Icon(LucideIcons.video, color: Color(0xFF54C5F8)),
+      );
+    }
+    if (item.url.startsWith('data:image')) {
+      try {
+        return Image.memory(
+          base64Decode(item.url.split(',').last),
+          fit: BoxFit.cover,
+        );
+      } catch (_) {}
+    }
+    return Image.network(
+      item.url,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(
+        color: Colors.white.withOpacity(.08),
+        child: const Icon(LucideIcons.image, color: Colors.white38),
+      ),
+    );
+  }
 
   final List<CommonGroup> _commonGroups = const [
     CommonGroup(
@@ -76,7 +106,14 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, anim, secAnim) => MediaLinksDocsScreen(contactName: widget.contactName),
+        pageBuilder: (context, anim, secAnim) => MediaLinksDocsScreen(
+          contactName: widget.contactName,
+          customMediaItems: widget.mediaItems,
+          customDocItems: widget.docItems,
+          customLinkItems: widget.linkItems,
+          onShowInChat: widget.onShowInChat,
+          onDeleteMessage: widget.onDeleteMessage,
+        ),
         transitionsBuilder: (context, anim, secAnim, child) {
           return FadeTransition(
             opacity: CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
@@ -117,7 +154,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: Colors.white.withOpacity(0.28), width: 1.2),
+                border: Border.all(
+                    color: Colors.white.withOpacity(0.28), width: 1.2),
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -168,7 +206,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                         onPressed: () => Navigator.pop(context),
                         child: Text(
                           'Cancel',
-                          style: TextStyle(color: Colors.white.withOpacity(0.6)),
+                          style:
+                              TextStyle(color: Colors.white.withOpacity(0.6)),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -180,10 +219,14 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: confirmColor.withOpacity(0.2),
                           foregroundColor: confirmColor,
-                          side: BorderSide(color: confirmColor.withOpacity(0.5)),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          side:
+                              BorderSide(color: confirmColor.withOpacity(0.5)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
                         ),
-                        child: Text(confirmText, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        child: Text(confirmText,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -223,7 +266,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           fit: BoxFit.cover,
           width: double.infinity,
           height: double.infinity,
-          errorBuilder: (_, __, ___) => Container(color: const Color(0xFF09090B)),
+          errorBuilder: (_, __, ___) =>
+              Container(color: const Color(0xFF09090B)),
         );
       }
 
@@ -254,7 +298,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               child: const SizedBox.expand(),
             ),
           Container(
-            color: Colors.black.withOpacity((1.0 - wp.opacity).clamp(0.0, 0.95)),
+            color:
+                Colors.black.withOpacity((1.0 - wp.opacity).clamp(0.0, 0.95)),
           ),
         ],
       );
@@ -339,74 +384,81 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: Colors.white.withOpacity(0.12),
-                          border: Border.all(color: Colors.white.withOpacity(0.20)),
+                          border:
+                              Border.all(color: Colors.white.withOpacity(0.20)),
                         ),
-                        child: const Icon(LucideIcons.chevronLeft, size: 22, color: Colors.white),
+                        child: const Icon(LucideIcons.chevronLeft,
+                            size: 22, color: Colors.white),
                       ),
                     ),
                   ),
-                actions: [
-                  IconButton(
-                    icon: const Icon(LucideIcons.moreVertical, color: Colors.white),
-                    onPressed: () {
-                      _showActionToast('Contact options menu');
-                    },
-                  ),
-                ],
-                title: const Text(
-                  'Contact info',
-                  style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
-                ),
-              ),
-
-              // Main Profile Body
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Column(
-                    children: [
-                      // 1. Profile Avatar & Name Card
-                      _buildProfileHero(),
-                      const SizedBox(height: 16),
-
-                      // 2. Action Buttons (Audio, Video, Search)
-                      _buildActionButtonsRow(),
-                      const SizedBox(height: 16),
-
-                      // 3. Bio / About Section
-                      _buildAboutSection(),
-                      const SizedBox(height: 16),
-
-                      // 4. Media, Links and Docs Preview Container
-                      _buildMediaLinksDocsPreview(),
-                      const SizedBox(height: 16),
-
-                      // 5. Notifications & Preferences
-                      _buildPreferencesCard(),
-                      const SizedBox(height: 16),
-
-                      // 6. Security & Encryption
-                      _buildEncryptionCard(),
-                      const SizedBox(height: 16),
-
-                      // 7. Groups in Common
-                      _buildGroupsInCommonCard(),
-                      const SizedBox(height: 16),
-
-                      // 8. Danger Zone / Actions (Block, Report, Clear)
-                      _buildDangerZoneActions(),
-                      const SizedBox(height: 40),
-                    ],
+                  actions: [
+                    IconButton(
+                      icon: const Icon(LucideIcons.moreVertical,
+                          color: Colors.white),
+                      onPressed: () {
+                        _showActionToast('Contact options menu');
+                      },
+                    ),
+                  ],
+                  title: const Text(
+                    'Contact info',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ],
+
+                // Main Profile Body
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    child: Column(
+                      children: [
+                        // 1. Profile Avatar & Name Card
+                        _buildProfileHero(),
+                        const SizedBox(height: 16),
+
+                        // 2. Action Buttons (Audio, Video, Search)
+                        _buildActionButtonsRow(),
+                        const SizedBox(height: 16),
+
+                        // 3. Bio / About Section
+                        _buildAboutSection(),
+                        const SizedBox(height: 16),
+
+                        // 4. Media, Links and Docs Preview Container
+                        _buildMediaLinksDocsPreview(),
+                        const SizedBox(height: 16),
+
+                        // 5. Notifications & Preferences
+                        _buildPreferencesCard(),
+                        const SizedBox(height: 16),
+
+                        // 6. Security & Encryption
+                        _buildEncryptionCard(),
+                        const SizedBox(height: 16),
+
+                        // 7. Groups in Common
+                        _buildGroupsInCommonCard(),
+                        const SizedBox(height: 16),
+
+                        // 8. Danger Zone / Actions (Block, Report, Clear)
+                        _buildDangerZoneActions(),
+                        const SizedBox(height: 40),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // 1. Profile Hero Avatar & Names
   Widget _buildProfileHero() {
@@ -447,7 +499,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF00E676),
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFF09090B), width: 3.5),
+                    border:
+                        Border.all(color: const Color(0xFF09090B), width: 3.5),
                   ),
                 ),
             ],
@@ -474,13 +527,16 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
             decoration: BoxDecoration(
-              color: (widget.isOnline ? const Color(0xFF00E676) : Colors.white24).withOpacity(0.15),
+              color:
+                  (widget.isOnline ? const Color(0xFF00E676) : Colors.white24)
+                      .withOpacity(0.15),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
               widget.isOnline ? 'Active in Workspace' : 'Last seen recently',
               style: TextStyle(
-                color: widget.isOnline ? const Color(0xFF00E676) : Colors.white60,
+                color:
+                    widget.isOnline ? const Color(0xFF00E676) : Colors.white60,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
@@ -499,7 +555,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           child: _buildActionButton(
             icon: LucideIcons.phone,
             label: 'Audio',
-            onTap: () => _showActionToast('Starting voice call with ${widget.contactName}...'),
+            onTap: () => _showActionToast(
+                'Starting voice call with ${widget.contactName}...'),
           ),
         ),
         const SizedBox(width: 12),
@@ -507,7 +564,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           child: _buildActionButton(
             icon: LucideIcons.video,
             label: 'Video',
-            onTap: () => _showActionToast('Starting video code review session...'),
+            onTap: () =>
+                _showActionToast('Starting video code review session...'),
           ),
         ),
         const SizedBox(width: 12),
@@ -531,7 +589,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: _glassCardDecoration(borderRadius: BorderRadius.circular(18)),
+        decoration:
+            _glassCardDecoration(borderRadius: BorderRadius.circular(18)),
         child: Column(
           children: [
             Container(
@@ -605,6 +664,10 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
 
   // 4. Media, Links and Docs Preview Container
   Widget _buildMediaLinksDocsPreview() {
+    final totalItems = widget.mediaItems.length +
+        widget.docItems.length +
+        widget.linkItems.length;
+    final previews = widget.mediaItems.take(4).toList(growable: false);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -629,7 +692,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '84 shared files & items',
+                        '$totalItems shared ${totalItems == 1 ? 'item' : 'items'}',
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.55),
                           fontSize: 12,
@@ -639,7 +702,7 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                   ),
                 ),
                 Text(
-                  '84',
+                  '$totalItems',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.6),
                     fontSize: 14,
@@ -647,38 +710,33 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Icon(LucideIcons.chevronRight, size: 18, color: Colors.white54),
+                const Icon(LucideIcons.chevronRight,
+                    size: 18, color: Colors.white54),
               ],
             ),
           ),
-          const SizedBox(height: 14),
-          // 4 horizontal thumbnail previews
-          Row(
-            children: _mediaThumbnails.map((thumbUrl) {
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: SpringButton(
-                    onTap: _openMediaLinksDocs,
-                    child: AspectRatio(
-                      aspectRatio: 1.0,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          thumbUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => Container(
-                            color: Colors.white.withOpacity(0.1),
-                            child: const Icon(LucideIcons.image, size: 18, color: Colors.white38),
-                          ),
+          if (previews.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: previews.map((item) {
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: SpringButton(
+                      onTap: _openMediaLinksDocs,
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: _mediaThumbnail(item),
                         ),
                       ),
                     ),
                   ),
-                ),
-              );
-            }).toList(),
-          ),
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );
@@ -694,37 +752,49 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           SwitchListTile(
             title: const Text(
               'Mute notifications',
-              style: TextStyle(color: Colors.white, fontSize: 14.5, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w600),
             ),
             subtitle: Text(
               _muteNotifications ? 'Muted' : 'Unmuted',
-              style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+              style:
+                  TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
             ),
             value: _muteNotifications,
             activeColor: const Color(0xFF54C5F8),
             onChanged: (val) {
               setState(() => _muteNotifications = val);
-              _showActionToast(val ? 'Notifications muted' : 'Notifications unmuted');
+              _showActionToast(
+                  val ? 'Notifications muted' : 'Notifications unmuted');
             },
           ),
           Divider(color: Colors.white.withOpacity(0.08), height: 1),
           // Custom Notifications
           ListTile(
-            title: const Text('Custom notifications', style: TextStyle(color: Colors.white, fontSize: 14.5)),
-            trailing: const Icon(LucideIcons.chevronRight, size: 18, color: Colors.white54),
+            title: const Text('Custom notifications',
+                style: TextStyle(color: Colors.white, fontSize: 14.5)),
+            trailing: const Icon(LucideIcons.chevronRight,
+                size: 18, color: Colors.white54),
             onTap: () => _showActionToast('Custom notification tone settings'),
           ),
           Divider(color: Colors.white.withOpacity(0.08), height: 1),
           // Starred Messages
           ListTile(
-            leading: const Icon(LucideIcons.star, size: 20, color: Color(0xFFFFD700)),
-            title: const Text('Starred messages', style: TextStyle(color: Colors.white, fontSize: 14.5)),
+            leading: const Icon(LucideIcons.star,
+                size: 20, color: Color(0xFFFFD700)),
+            title: const Text('Starred messages',
+                style: TextStyle(color: Colors.white, fontSize: 14.5)),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('6', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
+                Text('6',
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.5), fontSize: 13)),
                 const SizedBox(width: 4),
-                const Icon(LucideIcons.chevronRight, size: 18, color: Colors.white54),
+                const Icon(LucideIcons.chevronRight,
+                    size: 18, color: Colors.white54),
               ],
             ),
             onTap: () => _showActionToast('Opening starred messages'),
@@ -732,21 +802,28 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           Divider(color: Colors.white.withOpacity(0.08), height: 1),
           // Disappearing Messages
           ListTile(
-            leading: const Icon(LucideIcons.clock, size: 20, color: Color(0xFFB388FF)),
-            title: const Text('Disappearing messages', style: TextStyle(color: Colors.white, fontSize: 14.5)),
+            leading: const Icon(LucideIcons.clock,
+                size: 20, color: Color(0xFFB388FF)),
+            title: const Text('Disappearing messages',
+                style: TextStyle(color: Colors.white, fontSize: 14.5)),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(_disappearingMessages, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
+                Text(_disappearingMessages,
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.5), fontSize: 13)),
                 const SizedBox(width: 4),
-                const Icon(LucideIcons.chevronRight, size: 18, color: Colors.white54),
+                const Icon(LucideIcons.chevronRight,
+                    size: 18, color: Colors.white54),
               ],
             ),
             onTap: () {
               setState(() {
-                _disappearingMessages = _disappearingMessages == 'Off' ? '24 hours' : 'Off';
+                _disappearingMessages =
+                    _disappearingMessages == 'Off' ? '24 hours' : 'Off';
               });
-              _showActionToast('Disappearing messages set to $_disappearingMessages');
+              _showActionToast(
+                  'Disappearing messages set to $_disappearingMessages');
             },
           ),
         ],
@@ -768,7 +845,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               shape: BoxShape.circle,
               color: const Color(0xFF00E676).withOpacity(0.12),
             ),
-            child: const Icon(LucideIcons.lock, size: 18, color: Color(0xFF00E676)),
+            child: const Icon(LucideIcons.lock,
+                size: 18, color: Color(0xFF00E676)),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -822,14 +900,16 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
               const Spacer(),
               Text(
                 '${_commonGroups.length}',
-                style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.6), fontSize: 12),
               ),
             ],
           ),
           const SizedBox(height: 12),
           // Create group with Alex
           SpringButton(
-            onTap: () => _showActionToast('Creating new shared team with ${widget.contactName}...'),
+            onTap: () => _showActionToast(
+                'Creating new shared team with ${widget.contactName}...'),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Row(
@@ -841,7 +921,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                       color: const Color(0xFF54C5F8).withOpacity(0.15),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(LucideIcons.users, size: 20, color: Color(0xFF54C5F8)),
+                    child: const Icon(LucideIcons.users,
+                        size: 20, color: Color(0xFF54C5F8)),
                   ),
                   const SizedBox(width: 14),
                   Text(
@@ -871,10 +952,12 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.12)),
+                        border:
+                            Border.all(color: Colors.white.withOpacity(0.12)),
                       ),
                       child: Center(
-                        child: Text(group.iconEmoji, style: const TextStyle(fontSize: 18)),
+                        child: Text(group.iconEmoji,
+                            style: const TextStyle(fontSize: 18)),
                       ),
                     ),
                     const SizedBox(width: 14),
@@ -901,7 +984,8 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
                         ],
                       ),
                     ),
-                    const Icon(LucideIcons.chevronRight, size: 16, color: Colors.white38),
+                    const Icon(LucideIcons.chevronRight,
+                        size: 16, color: Colors.white38),
                   ],
                 ),
               ),
@@ -920,26 +1004,35 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
         children: [
           // Add to Favourites
           ListTile(
-            leading: const Icon(LucideIcons.heart, size: 20, color: Color(0xFFFF5252)),
-            title: const Text('Add to favourites', style: TextStyle(color: Colors.white, fontSize: 14.5)),
-            onTap: () => _showActionToast('Added ${widget.contactName} to favourites'),
+            leading: const Icon(LucideIcons.heart,
+                size: 20, color: Color(0xFFFF5252)),
+            title: const Text('Add to favourites',
+                style: TextStyle(color: Colors.white, fontSize: 14.5)),
+            onTap: () =>
+                _showActionToast('Added ${widget.contactName} to favourites'),
           ),
           Divider(color: Colors.white.withOpacity(0.08), height: 1),
           // Export Chat
           ListTile(
-            leading: const Icon(LucideIcons.share2, size: 20, color: Colors.white70),
-            title: const Text('Export chat', style: TextStyle(color: Colors.white, fontSize: 14.5)),
-            onTap: () => _showActionToast('Exporting conversation transcript...'),
+            leading:
+                const Icon(LucideIcons.share2, size: 20, color: Colors.white70),
+            title: const Text('Export chat',
+                style: TextStyle(color: Colors.white, fontSize: 14.5)),
+            onTap: () =>
+                _showActionToast('Exporting conversation transcript...'),
           ),
           Divider(color: Colors.white.withOpacity(0.08), height: 1),
           // Clear Chat
           ListTile(
-            leading: const Icon(LucideIcons.trash2, size: 20, color: Colors.white70),
-            title: const Text('Clear chat', style: TextStyle(color: Colors.white, fontSize: 14.5)),
+            leading:
+                const Icon(LucideIcons.trash2, size: 20, color: Colors.white70),
+            title: const Text('Clear chat',
+                style: TextStyle(color: Colors.white, fontSize: 14.5)),
             onTap: () {
               _showConfirmDialog(
                 title: 'Clear Chat?',
-                message: 'All messages in this chat will be cleared from this device.',
+                message:
+                    'All messages in this chat will be cleared from this device.',
                 confirmText: 'Clear Chat',
                 confirmColor: const Color(0xFFFF5252),
                 onConfirm: () => _showActionToast('Chat cleared'),
@@ -949,36 +1042,48 @@ class _ContactInfoScreenState extends State<ContactInfoScreen> {
           Divider(color: Colors.white.withOpacity(0.08), height: 1),
           // Block Contact
           ListTile(
-            leading: const Icon(LucideIcons.ban, size: 20, color: Color(0xFFFF5252)),
+            leading:
+                const Icon(LucideIcons.ban, size: 20, color: Color(0xFFFF5252)),
             title: Text(
               'Block ${widget.contactName}',
-              style: const TextStyle(color: Color(0xFFFF5252), fontSize: 14.5, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  color: Color(0xFFFF5252),
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.bold),
             ),
             onTap: () {
               _showConfirmDialog(
                 title: 'Block ${widget.contactName}?',
-                message: 'Blocked contacts will not be able to call you or send you messages.',
+                message:
+                    'Blocked contacts will not be able to call you or send you messages.',
                 confirmText: 'Block',
                 confirmColor: const Color(0xFFFF5252),
-                onConfirm: () => _showActionToast('${widget.contactName} blocked'),
+                onConfirm: () =>
+                    _showActionToast('${widget.contactName} blocked'),
               );
             },
           ),
           Divider(color: Colors.white.withOpacity(0.08), height: 1),
           // Report Contact
           ListTile(
-            leading: const Icon(LucideIcons.flag, size: 20, color: Color(0xFFFF5252)),
+            leading: const Icon(LucideIcons.flag,
+                size: 20, color: Color(0xFFFF5252)),
             title: Text(
               'Report ${widget.contactName}',
-              style: const TextStyle(color: Color(0xFFFF5252), fontSize: 14.5, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  color: Color(0xFFFF5252),
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.bold),
             ),
             onTap: () {
               _showConfirmDialog(
                 title: 'Report ${widget.contactName}?',
-                message: 'The last 5 messages from this contact will be forwarded to CodeSnap Safety team.',
+                message:
+                    'The last 5 messages from this contact will be forwarded to CodeSnap Safety team.',
                 confirmText: 'Report',
                 confirmColor: const Color(0xFFFF5252),
-                onConfirm: () => _showActionToast('Report submitted. Thank you for keeping CodeSnap safe.'),
+                onConfirm: () => _showActionToast(
+                    'Report submitted. Thank you for keeping CodeSnap safe.'),
               );
             },
           ),

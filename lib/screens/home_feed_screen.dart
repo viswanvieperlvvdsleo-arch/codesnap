@@ -2355,8 +2355,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
 
   Widget _buildStoriesSection() {
     final isDesktop = MediaQuery.of(context).size.width > 700;
-    final storiesHeight = isDesktop ? 168.0 : 220.0;
-    final storyCardWidth = isDesktop ? 90.0 : 110.0;
+    final storiesHeight = isDesktop ? 118.0 : 130.0;
+    final storyCardWidth = isDesktop ? 82.0 : 90.0;
 
     return Container(
       color: ThemeProvider.backgroundWarmWhite,
@@ -2483,50 +2483,120 @@ class _HomeFeedScreenState extends State<HomeFeedScreen>
           }
         },
         scale: story.isAddStory ? 1.0 : 0.92,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          width: width,
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: story.isAddStory
-                ? (_myStoryItems.isNotEmpty
-                    ? Border.all(color: const Color(0xFFFFD700), width: 1.8)
-                    : Border.all(
-                        color: Colors.white.withOpacity(0.12), width: 1.2))
-                : story.isViewed
-                    ? Border.all(
-                        color: Colors.white.withOpacity(0.18),
-                        width: 1.2,
-                      )
-                    : Border.all(
-                        color: Colors.white.withOpacity(0.92),
-                        width: 1.8,
+        borderRadius: BorderRadius.circular(999),
+        child: _buildCircularStory(story, width),
+      ),
+    );
+  }
+
+  Widget _buildCircularStory(FeedStory story, double width) {
+    final hasMyStory = _myStoryItems.isNotEmpty;
+    final displayUrl = story.isAddStory && hasMyStory
+        ? _myStoryItems.last.imageUrl
+        : story.imageUrl;
+    final ringColor = story.isAddStory
+        ? (hasMyStory ? const Color(0xFFFFD700) : Colors.white30)
+        : (story.isViewed ? Colors.white24 : Colors.white);
+    final diameter = width - 10;
+    return SizedBox(
+      width: width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: diameter,
+            height: diameter,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: ringColor, width: 2.2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: ringColor.withOpacity(.26),
+                        blurRadius: 12,
+                        spreadRadius: 1,
                       ),
-            boxShadow: [
-              if (!story.isAddStory && !story.isViewed)
-                BoxShadow(
-                  color: Colors.white.withOpacity(0.38),
-                  blurRadius: 10,
-                  spreadRadius: 1,
-                  offset: const Offset(0, 2),
+                    ],
+                  ),
+                  padding: const EdgeInsets.all(3),
+                  child: ClipOval(
+                    child: Image.network(
+                      displayUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: const Color(0xFF1B1D26),
+                        child: const Icon(LucideIcons.user,
+                            color: Colors.white38, size: 30),
+                      ),
+                    ),
+                  ),
                 ),
-              BoxShadow(
-                color: story.isAddStory
-                    ? ThemeProvider.primaryGold.withOpacity(0.25)
-                    : Colors.black.withOpacity(0.12),
-                blurRadius: 14,
-                offset: const Offset(0, 5),
-              ),
-            ],
+                if (story.isViewed && !story.isAddStory)
+                  Positioned.fill(
+                    child: ClipOval(
+                      child: ColoredBox(color: Colors.black.withOpacity(.32)),
+                    ),
+                  ),
+                if (story.isAddStory)
+                  Positioned(
+                    right: -1,
+                    bottom: -1,
+                    child: SpringButton(
+                      onTap: _openPostMomentSheet,
+                      borderRadius: BorderRadius.circular(99),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFFFFC107),
+                          border: Border.all(
+                              color: ThemeProvider.backgroundWarmWhite,
+                              width: 2),
+                        ),
+                        child: const Icon(LucideIcons.plus,
+                            color: Colors.black, size: 17),
+                      ),
+                    ),
+                  ),
+                if (story.isLive && !story.isAddStory)
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    bottom: -5,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      decoration: BoxDecoration(
+                        color: ThemeProvider.primaryGold,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text('LIVE',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: Colors.black,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w900)),
+                    ),
+                  ),
+              ],
+            ),
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: story.isAddStory
-                ? _buildAddStoryCard(story)
-                : _buildUserStoryCard(story),
+          const SizedBox(height: 7),
+          Text(
+            story.isAddStory ? 'Your Story' : story.username,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

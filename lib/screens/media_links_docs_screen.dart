@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:ui';
+import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -13,6 +14,7 @@ class MediaItem {
   final String? videoDuration;
   final String dateGroup;
   final String subtitle;
+  final bool canDelete;
 
   const MediaItem({
     required this.id,
@@ -22,6 +24,7 @@ class MediaItem {
     this.videoDuration,
     required this.dateGroup,
     required this.subtitle,
+    this.canDelete = false,
   });
 }
 
@@ -66,6 +69,8 @@ class MediaLinksDocsScreen extends StatefulWidget {
   final List<MediaItem>? customMediaItems;
   final List<DocItem>? customDocItems;
   final List<LinkItem>? customLinkItems;
+  final ValueChanged<String>? onShowInChat;
+  final Future<bool> Function(String messageId)? onDeleteMessage;
 
   const MediaLinksDocsScreen({
     super.key,
@@ -73,6 +78,8 @@ class MediaLinksDocsScreen extends StatefulWidget {
     this.customMediaItems,
     this.customDocItems,
     this.customLinkItems,
+    this.onShowInChat,
+    this.onDeleteMessage,
   });
 
   @override
@@ -86,6 +93,9 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
   late List<MediaItem> _mediaItems;
   late List<DocItem> _docItems;
   late List<LinkItem> _linkItems;
+  final Set<String> _selectedMediaIds = {};
+
+  bool get _isSelectingMedia => _selectedMediaIds.isNotEmpty;
 
   @override
   void initState() {
@@ -125,6 +135,69 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
     super.dispose();
   }
 
+  void _toggleMediaSelection(MediaItem item) {
+    setState(() {
+      if (!_selectedMediaIds.add(item.id)) {
+        _selectedMediaIds.remove(item.id);
+      }
+    });
+  }
+
+  Future<void> _downloadMedia(MediaItem item) async {
+    try {
+      final uri = Uri.tryParse(item.url);
+      final urlName =
+          uri?.pathSegments.isNotEmpty == true ? uri!.pathSegments.last : '';
+      final sourceName = item.title.trim().isNotEmpty ? item.title : urlName;
+      final safeName = sourceName
+          .replaceAll(RegExp(r'[^a-zA-Z0-9._-]+'), '_')
+          .replaceAll(RegExp(r'^_+|_+$'), '');
+      await FileSaver.instance.downloadLink(
+        link: LinkDetails(link: item.url),
+        name: safeName.isEmpty ? 'codesnap-media-${item.id}' : safeName,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Download started on this device')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not download media: $error')),
+      );
+    }
+  }
+
+  Future<void> _deleteMediaItems(Iterable<MediaItem> items) async {
+    final callback = widget.onDeleteMessage;
+    if (callback == null) return;
+    final deletedIds = <String>{};
+    var skipped = 0;
+    for (final item in items.toList(growable: false)) {
+      if (!item.canDelete) {
+        skipped++;
+        continue;
+      }
+      try {
+        if (await callback(item.id)) deletedIds.add(item.id);
+      } catch (_) {
+        skipped++;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _mediaItems.removeWhere((item) => deletedIds.contains(item.id));
+      _selectedMediaIds.clear();
+    });
+    final message = deletedIds.isEmpty
+        ? 'Only media you sent can be deleted for everyone'
+        : skipped > 0
+            ? '${deletedIds.length} deleted; $skipped could not be deleted'
+            : '${deletedIds.length} media item${deletedIds.length == 1 ? '' : 's'} deleted';
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   void _showMediaPreview(MediaItem item) {
     showDialog(
       context: context,
@@ -134,13 +207,12 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
           filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
           child: Dialog(
             backgroundColor: Colors.transparent,
-            insetPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            insetPadding: EdgeInsets.zero,
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 550, maxHeight: 650),
+              width: double.infinity,
+              height: double.infinity,
               decoration: BoxDecoration(
                 color: const Color(0xFF0C0D14).withOpacity(0.92),
-                borderRadius: BorderRadius.circular(24),
                 border: Border.all(
                     color: Colors.white.withOpacity(0.18), width: 1.2),
                 boxShadow: [
@@ -151,8 +223,7 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                   ),
                 ],
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
+              child: SafeArea(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -218,7 +289,7 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                           else
                             _buildSafeImage(
                               item.url,
-                              fit: BoxFit.cover,
+                              fit: BoxFit.contain,
                               width: double.infinity,
                             ),
                           if (item.isVideo)
@@ -240,8 +311,10 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                     // Bottom actions bar
                     Padding(
                       padding: const EdgeInsets.all(16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
                           _buildModalAction(LucideIcons.share2, 'Share', () {
                             Clipboard.setData(ClipboardData(text: item.url));
@@ -251,14 +324,23 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                                   content: Text('Media link copied')),
                             );
                           }),
-                          _buildModalAction(LucideIcons.copy, 'Copy link', () {
-                            Clipboard.setData(ClipboardData(text: item.url));
+                          _buildModalAction(LucideIcons.download, 'Download',
+                              () {
                             Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Media link copied')),
-                            );
+                            _downloadMedia(item);
                           }),
+                          if (widget.onShowInChat != null)
+                            _buildModalAction(
+                                LucideIcons.messageSquare, 'Show in chat', () {
+                              Navigator.pop(context);
+                              Navigator.pop(this.context);
+                              widget.onShowInChat?.call(item.id);
+                            }),
+                          if (item.canDelete && widget.onDeleteMessage != null)
+                            _buildModalAction(LucideIcons.trash2, 'Delete', () {
+                              Navigator.pop(context);
+                              _deleteMediaItems([item]);
+                            }),
                         ],
                       ),
                     ),
@@ -341,8 +423,10 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'Media, links and docs',
+                                Text(
+                                  _isSelectingMedia
+                                      ? '${_selectedMediaIds.length} selected'
+                                      : 'Media, links and docs',
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 18,
@@ -360,22 +444,44 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
                             ),
                           ),
                           SpringButton(
-                            onTap: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Search filter active')),
-                              );
-                            },
+                            onTap: _isSelectingMedia
+                                ? () {
+                                    final selected = _mediaItems
+                                        .where((item) =>
+                                            _selectedMediaIds.contains(item.id))
+                                        .toList(growable: false);
+                                    _deleteMediaItems(selected);
+                                  }
+                                : () {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content: Text(
+                                              'Long-press media to select')),
+                                    );
+                                  },
                             child: Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: Colors.white.withOpacity(0.06),
                               ),
-                              child: const Icon(LucideIcons.search,
-                                  size: 20, color: Colors.white),
+                              child: Icon(
+                                  _isSelectingMedia
+                                      ? LucideIcons.trash2
+                                      : LucideIcons.search,
+                                  size: 20,
+                                  color: _isSelectingMedia
+                                      ? const Color(0xFFFF6B6B)
+                                      : Colors.white),
                             ),
                           ),
+                          if (_isSelectingMedia)
+                            IconButton(
+                              onPressed: () =>
+                                  setState(_selectedMediaIds.clear),
+                              icon: const Icon(LucideIcons.x,
+                                  color: Colors.white70),
+                            ),
                         ],
                       ),
                     ),
@@ -459,70 +565,96 @@ class _MediaLinksDocsScreenState extends State<MediaLinksDocsScreen>
               ),
               itemBuilder: (context, gIndex) {
                 final item = items[gIndex];
-                return SpringButton(
-                  onTap: () => _showMediaPreview(item),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        if (item.isVideo)
-                          Container(
-                            color: const Color(0xFF151923),
-                            alignment: Alignment.center,
-                            child: const Icon(LucideIcons.video,
-                                size: 34, color: Color(0xFF54C5F8)),
-                          )
-                        else
-                          _buildSafeImage(item.url, fit: BoxFit.cover),
-                        // Dark glass gradient overlay for readability
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.transparent,
-                                  Colors.black.withOpacity(0.6),
-                                ],
+                return GestureDetector(
+                  onLongPress: () => _toggleMediaSelection(item),
+                  child: SpringButton(
+                    onTap: () => _isSelectingMedia
+                        ? _toggleMediaSelection(item)
+                        : _showMediaPreview(item),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (item.isVideo)
+                            Container(
+                              color: const Color(0xFF151923),
+                              alignment: Alignment.center,
+                              child: const Icon(LucideIcons.video,
+                                  size: 34, color: Color(0xFF54C5F8)),
+                            )
+                          else
+                            _buildSafeImage(item.url, fit: BoxFit.cover),
+                          // Dark glass gradient overlay for readability
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.transparent,
+                                    Colors.black.withOpacity(0.6),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        // Video Badge
-                        if (item.isVideo)
-                          Positioned(
-                            bottom: 6,
-                            left: 6,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.75),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                    color: Colors.white.withOpacity(0.2)),
+                          // Video Badge
+                          if (item.isVideo)
+                            Positioned(
+                              bottom: 6,
+                              left: 6,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.75),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                      color: Colors.white.withOpacity(0.2)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(LucideIcons.play,
+                                        size: 10, color: Colors.white),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      item.videoDuration ?? 'Video',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(LucideIcons.play,
-                                      size: 10, color: Colors.white),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    item.videoDuration ?? 'Video',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
+                            ),
+                          if (_selectedMediaIds.contains(item.id))
+                            Positioned.fill(
+                              child: ColoredBox(
+                                color: const Color(0x6654C5F8),
+                                child: Align(
+                                  alignment: Alignment.topRight,
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(7),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF54C5F8),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(LucideIcons.check,
+                                          size: 14, color: Colors.black),
                                     ),
                                   ),
-                                ],
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );

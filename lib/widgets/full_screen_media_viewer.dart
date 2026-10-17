@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:ui';
+import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -15,6 +16,7 @@ class FullScreenMediaViewer extends StatefulWidget {
   final String senderAvatar;
   final VoidCallback? onShowInChat;
   final VoidCallback? onShare;
+  final Future<bool> Function()? onDelete;
 
   const FullScreenMediaViewer({
     super.key,
@@ -23,6 +25,7 @@ class FullScreenMediaViewer extends StatefulWidget {
     required this.senderAvatar,
     this.onShowInChat,
     this.onShare,
+    this.onDelete,
   });
 
   static void show(
@@ -32,18 +35,21 @@ class FullScreenMediaViewer extends StatefulWidget {
     required String senderAvatar,
     VoidCallback? onShowInChat,
     VoidCallback? onShare,
+    Future<bool> Function()? onDelete,
   }) {
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
         barrierDismissible: true,
         barrierColor: Colors.black.withOpacity(0.92),
-        pageBuilder: (context, animation, secondaryAnimation) => FullScreenMediaViewer(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            FullScreenMediaViewer(
           message: message,
           senderName: senderName,
           senderAvatar: senderAvatar,
           onShowInChat: onShowInChat,
           onShare: onShare,
+          onDelete: onDelete,
         ),
         transitionsBuilder: (context, anim, secAnim, child) {
           return FadeTransition(
@@ -65,7 +71,8 @@ class FullScreenMediaViewer extends StatefulWidget {
 }
 
 class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
-  final TransformationController _transformController = TransformationController();
+  final TransformationController _transformController =
+      TransformationController();
   TapDownDetails? _doubleTapDetails;
   bool _controlsVisible = true;
   bool _isPlayingVideo = false;
@@ -87,18 +94,41 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
     }
   }
 
-  void _downloadMedia() {
-    MorphingCapsule.show(
-      context,
-      icon: LucideIcons.download,
-      label: 'Saved to device gallery',
-      color: ThemeProvider.primaryGold,
-    );
+  Future<void> _downloadMedia() async {
+    final url = widget.message.mediaUrl;
+    if (url == null || url.isEmpty) return;
+    try {
+      final rawName = widget.message.mediaCaption?.trim();
+      final safeName = (rawName?.isNotEmpty == true
+              ? rawName!
+              : 'codesnap-media-${widget.message.id}')
+          .replaceAll(RegExp(r'[^a-zA-Z0-9._-]+'), '_');
+      await FileSaver.instance.downloadLink(
+        link: LinkDetails(link: url),
+        name: safeName,
+      );
+      if (!mounted) return;
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.download,
+        label: 'Download started on this device',
+        color: ThemeProvider.primaryGold,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      MorphingCapsule.show(
+        context,
+        icon: LucideIcons.triangleAlert,
+        label: 'Download failed',
+        color: const Color(0xFFFF5252),
+      );
+    }
   }
 
   void _copyMediaInfo() {
     final caption = widget.message.mediaCaption ?? widget.message.text;
-    Clipboard.setData(ClipboardData(text: caption.isNotEmpty ? caption : widget.message.mediaUrl ?? ''));
+    Clipboard.setData(ClipboardData(
+        text: caption.isNotEmpty ? caption : widget.message.mediaUrl ?? ''));
     MorphingCapsule.show(
       context,
       icon: LucideIcons.copy,
@@ -149,7 +179,8 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
           ),
 
           // Bottom Caption Bar
-          if ((msg.mediaCaption?.isNotEmpty == true || msg.text.isNotEmpty) && _controlsVisible)
+          if ((msg.mediaCaption?.isNotEmpty == true || msg.text.isNotEmpty) &&
+              _controlsVisible)
             Positioned(
               bottom: 24,
               left: 20,
@@ -171,14 +202,17 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
           ClipRRect(
             borderRadius: BorderRadius.circular(16),
             child: Image.network(
-              url.isNotEmpty ? url : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
+              url.isNotEmpty
+                  ? url
+                  : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800',
               fit: BoxFit.contain,
               errorBuilder: (_, __, ___) => Container(
                 width: 320,
                 height: 220,
                 color: const Color(0xFF1E2028),
                 child: const Center(
-                  child: Icon(LucideIcons.video, size: 54, color: Colors.white30),
+                  child:
+                      Icon(LucideIcons.video, size: 54, color: Colors.white30),
                 ),
               ),
             ),
@@ -190,7 +224,8 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.65),
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.8), width: 2),
+                border: Border.all(
+                    color: const Color(0xFFFFD700).withOpacity(0.8), width: 2),
                 boxShadow: [
                   BoxShadow(
                     color: const Color(0xFFFFD700).withOpacity(0.4),
@@ -243,7 +278,8 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
 
   Widget _buildTopHeaderBar(ChatMessage msg) {
     return Container(
-      padding: EdgeInsets.fromLTRB(14, MediaQuery.of(context).padding.top + 8, 14, 12),
+      padding: EdgeInsets.fromLTRB(
+          14, MediaQuery.of(context).padding.top + 8, 14, 12),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -325,6 +361,17 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
             onTap: _downloadMedia,
           ),
 
+          if (widget.onDelete != null)
+            _buildTopActionButton(
+              icon: LucideIcons.trash2,
+              tooltip: 'Delete media',
+              color: const Color(0xFFFF6B6B),
+              onTap: () async {
+                final deleted = await widget.onDelete?.call() ?? false;
+                if (deleted && context.mounted) Navigator.pop(context);
+              },
+            ),
+
           // Action 3: Share / Forward
           _buildTopActionButton(
             icon: LucideIcons.share2,
@@ -365,7 +412,8 @@ class _FullScreenMediaViewerState extends State<FullScreenMediaViewer> {
   }
 
   Widget _buildBottomCaptionPill(ChatMessage msg) {
-    final text = msg.mediaCaption?.isNotEmpty == true ? msg.mediaCaption! : msg.text;
+    final text =
+        msg.mediaCaption?.isNotEmpty == true ? msg.mediaCaption! : msg.text;
 
     return Center(
       child: ClipRRect(

@@ -1521,6 +1521,7 @@ class _ChatScreenState extends State<ChatScreen> {
             videoDuration: null,
             dateGroup: 'SHARED IN CHAT',
             subtitle: '${msg.isMe ? "Sent by you" : conv.name} • ${msg.time}',
+            canDelete: msg.isMe,
           ),
         );
       } else if (msg.mediaType == 'document' ||
@@ -1579,6 +1580,26 @@ class _ChatScreenState extends State<ChatScreen> {
           customMediaItems: sharedMedia,
           customDocItems: sharedDocs,
           customLinkItems: sharedLinks,
+          onShowInChat: (_) {
+            setState(() => _selectedConversationId = conv.id);
+          },
+          onDeleteMessage: (messageId) async {
+            ChatMessage? message;
+            for (final item in conv.messages) {
+              if (item.id == messageId) {
+                message = item;
+                break;
+              }
+            }
+            if (message == null || !message.isMe) return false;
+            await ChatService.deleteMessage(messageId);
+            if (mounted) {
+              setState(() =>
+                  conv.messages.removeWhere((item) => item.id == messageId));
+              ChatStateStore.instance.notifyConversationsUpdated();
+            }
+            return true;
+          },
         ),
         transitionsBuilder: (context, anim, secAnim, child) {
           return FadeTransition(

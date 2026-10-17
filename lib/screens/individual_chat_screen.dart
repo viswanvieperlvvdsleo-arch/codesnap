@@ -10,11 +10,165 @@ import '../widgets/spring_button.dart';
 import '../services/storage_picker.dart';
 import 'contact_info_screen.dart';
 import 'chat_screen.dart';
+import 'media_links_docs_screen.dart';
 import '../widgets/full_screen_media_viewer.dart';
 import '../services/supabase_service.dart';
 import '../services/chat_service.dart';
 import '../services/ai_chat_service.dart';
 import '../services/document_bytes_loader.dart';
+
+const Map<String, String> _emojiCatalog = {
+  '😀': 'smile happy face',
+  '😃': 'smile happy face',
+  '😄': 'smile laugh',
+  '😁': 'grin happy',
+  '😆': 'laugh happy',
+  '🥹': 'tears touched',
+  '😅': 'sweat smile',
+  '😂': 'laugh tears',
+  '🤣': 'rolling laugh',
+  '🙂': 'smile',
+  '🙃': 'upside down',
+  '😉': 'wink',
+  '😊': 'blush happy',
+  '😇': 'angel',
+  '🥰': 'love hearts',
+  '😍': 'heart eyes love',
+  '🤩': 'star eyes excited',
+  '😘': 'kiss love',
+  '😗': 'kiss',
+  '☺️': 'smile relaxed',
+  '😚': 'kiss closed eyes',
+  '😙': 'kiss smile',
+  '🥲': 'smile tear',
+  '😋': 'yum tasty',
+  '😛': 'tongue',
+  '😜': 'wink tongue',
+  '🤪': 'crazy silly',
+  '😝': 'tongue laugh',
+  '🤑': 'money',
+  '🤗': 'hug',
+  '🤭': 'giggle hand mouth',
+  '🫢': 'surprised hand mouth',
+  '🫣': 'peek',
+  '🤫': 'quiet shush',
+  '🤔': 'thinking',
+  '🫡': 'salute',
+  '🤐': 'zip mouth',
+  '🤨': 'suspicious eyebrow',
+  '😐': 'neutral',
+  '😑': 'expressionless',
+  '😶': 'silent',
+  '🫥': 'dotted invisible',
+  '😏': 'smirk',
+  '😒': 'unamused',
+  '🙄': 'eye roll',
+  '😬': 'grimace',
+  '🤥': 'lie',
+  '😌': 'relieved',
+  '😔': 'sad',
+  '😪': 'sleepy',
+  '🤤': 'drool',
+  '😴': 'sleep',
+  '😷': 'mask sick',
+  '🤒': 'sick fever',
+  '🤕': 'hurt',
+  '🤢': 'sick nausea',
+  '🤮': 'vomit',
+  '🤧': 'sneeze',
+  '🥵': 'hot',
+  '🥶': 'cold',
+  '🥴': 'woozy',
+  '😵': 'dizzy',
+  '🤯': 'mind blown',
+  '🤠': 'cowboy',
+  '🥳': 'party celebrate',
+  '🥸': 'disguise',
+  '😎': 'cool sunglasses',
+  '🤓': 'nerd',
+  '🧐': 'inspect monocle',
+  '😕': 'confused',
+  '🫤': 'unsure',
+  '😟': 'worried',
+  '🙁': 'sad',
+  '☹️': 'frown sad',
+  '😮': 'surprised',
+  '😯': 'hushed surprised',
+  '😲': 'astonished',
+  '😳': 'flushed',
+  '🥺': 'pleading',
+  '😦': 'frown open mouth',
+  '😧': 'anguished',
+  '😨': 'fear',
+  '😰': 'anxious sweat',
+  '😥': 'sad sweat',
+  '😢': 'cry',
+  '😭': 'cry loud',
+  '😱': 'scream fear',
+  '😖': 'confounded',
+  '😣': 'persevere',
+  '😞': 'disappointed',
+  '😓': 'down sweat',
+  '😩': 'weary',
+  '😫': 'tired',
+  '🥱': 'yawn',
+  '😤': 'triumph steam',
+  '😡': 'angry',
+  '😠': 'angry',
+  '🤬': 'swear angry',
+  '😈': 'devil',
+  '👿': 'devil angry',
+  '💀': 'skull dead',
+  '☠️': 'danger skull',
+  '💩': 'poop',
+  '🤡': 'clown',
+  '👻': 'ghost',
+  '👽': 'alien',
+  '🤖': 'robot',
+  '🎃': 'pumpkin halloween',
+  '😺': 'cat smile',
+  '😸': 'cat grin',
+  '😹': 'cat laugh',
+  '😻': 'cat love',
+  '😼': 'cat smirk',
+  '😽': 'cat kiss',
+  '🙀': 'cat fear',
+  '😿': 'cat cry',
+  '😾': 'cat angry',
+  '👍': 'thumbs up yes like',
+  '👎': 'thumbs down no dislike',
+  '👏': 'clap applause',
+  '🙌': 'celebrate hands',
+  '🫶': 'heart hands love',
+  '🙏': 'pray thanks',
+  '💪': 'strong muscle',
+  '🤝': 'handshake',
+  '👌': 'okay perfect',
+  '✌️': 'peace victory',
+  '🤞': 'luck fingers',
+  '❤️': 'heart love red',
+  '🧡': 'heart orange',
+  '💛': 'heart yellow',
+  '💚': 'heart green',
+  '💙': 'heart blue',
+  '💜': 'heart purple',
+  '🖤': 'heart black',
+  '🤍': 'heart white',
+  '💔': 'broken heart',
+  '❤️‍🔥': 'heart fire love',
+  '🔥': 'fire hot',
+  '✨': 'sparkles',
+  '⭐': 'star',
+  '🎉': 'party celebrate',
+  '🎊': 'confetti',
+  '🚀': 'rocket launch',
+  '💯': 'hundred perfect',
+  '✅': 'check yes done',
+  '❌': 'cross no',
+  '⚡': 'lightning fast',
+  '💡': 'idea light',
+  '👀': 'eyes look',
+};
 
 /// ─── Individual Chat Screen (Dedicated Page / Route) ────────────────────────
 /// Opened as a separate Navigator route on mobile/normal view so pressing the back
@@ -377,8 +531,215 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
     }
   }
 
+  Future<void> _showEmojiPicker(ChatMessage msg) async {
+    var query = '';
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, updateSheet) {
+          final normalized = query.trim().toLowerCase();
+          final emojis = _emojiCatalog.entries.where((entry) =>
+              normalized.isEmpty ||
+              entry.key.contains(normalized) ||
+              entry.value.contains(normalized));
+          return SafeArea(
+            child: Container(
+              height: MediaQuery.sizeOf(context).height * .66,
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFA101216),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(26)),
+                border: Border.all(color: const Color(0xFF26D980)),
+              ),
+              child: Column(children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  onChanged: (value) => updateSheet(() => query = value),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Search emoji',
+                    hintStyle: const TextStyle(color: Colors.white54),
+                    prefixIcon:
+                        const Icon(LucideIcons.search, color: Colors.white60),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(.05),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(22),
+                      borderSide: const BorderSide(color: Color(0xFF26D980)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(22),
+                      borderSide: const BorderSide(
+                          color: Color(0xFF26D980), width: 1.5),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: emojis.isEmpty
+                      ? const Center(
+                          child: Text('No emoji found',
+                              style: TextStyle(color: Colors.white54)))
+                      : LayoutBuilder(builder: (context, constraints) {
+                          final columns = constraints.maxWidth < 390 ? 7 : 10;
+                          final visible = emojis.toList(growable: false);
+                          return GridView.builder(
+                            itemCount: visible.length,
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columns,
+                              mainAxisSpacing: 5,
+                              crossAxisSpacing: 5,
+                            ),
+                            itemBuilder: (_, index) {
+                              final emoji = visible[index].key;
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () {
+                                  Navigator.pop(sheetContext);
+                                  _toggleEmojiReaction(msg, emoji);
+                                },
+                                child: Center(
+                                  child: Text(emoji,
+                                      style: const TextStyle(fontSize: 27)),
+                                ),
+                              );
+                            },
+                          );
+                        }),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _navigateToContactInfo() {
     setState(() => _showingContactInfo = true);
+  }
+
+  String _mediaDateGroup(DateTime sentAt) {
+    final local = sentAt.toLocal();
+    final now = DateTime.now();
+    if (local.year == now.year && local.month == now.month) {
+      return 'THIS MONTH';
+    }
+    const months = [
+      'JANUARY',
+      'FEBRUARY',
+      'MARCH',
+      'APRIL',
+      'MAY',
+      'JUNE',
+      'JULY',
+      'AUGUST',
+      'SEPTEMBER',
+      'OCTOBER',
+      'NOVEMBER',
+      'DECEMBER',
+    ];
+    final month = months[local.month - 1];
+    return local.year == now.year ? month : '$month ${local.year}';
+  }
+
+  List<MediaItem> get _sharedMediaItems => widget.conversation.messages
+      .where((message) =>
+          message.mediaUrl?.isNotEmpty == true &&
+          message.mediaType != 'document')
+      .map((message) => MediaItem(
+            id: message.id,
+            title: message.mediaCaption?.trim().isNotEmpty == true
+                ? message.mediaCaption!.trim()
+                : (message.mediaType == 'video' ? 'Video' : 'Image'),
+            url: message.mediaUrl!,
+            isVideo: message.mediaType == 'video',
+            dateGroup: _mediaDateGroup(message.sentAt),
+            subtitle:
+                '${message.isMe ? 'Sent by you' : widget.conversation.name} • ${message.time}',
+            canDelete: message.isMe && !message.id.startsWith('media_'),
+          ))
+      .toList(growable: false)
+      .reversed
+      .toList(growable: false);
+
+  List<DocItem> get _sharedDocumentItems => widget.conversation.messages
+          .where((message) =>
+              message.mediaUrl?.isNotEmpty == true &&
+              message.mediaType == 'document')
+          .map((message) {
+        final name = message.mediaCaption?.trim().isNotEmpty == true
+            ? message.mediaCaption!.trim()
+            : 'Shared document';
+        final extension =
+            name.contains('.') ? name.split('.').last.toUpperCase() : 'FILE';
+        return DocItem(
+          id: message.id,
+          name: name,
+          extension: extension,
+          size: 'Shared file',
+          date: message.time,
+          badgeColor: extension == 'PDF'
+              ? const Color(0xFFFF5252)
+              : const Color(0xFF54C5F8),
+          url: message.mediaUrl,
+        );
+      }).toList(growable: false);
+
+  List<LinkItem> get _sharedLinkItems {
+    final links = <LinkItem>[];
+    for (final message in widget.conversation.messages) {
+      final matches = RegExp(r'https?://[^\s]+').allMatches(message.text);
+      for (final match in matches) {
+        final url = match.group(0)!;
+        final uri = Uri.tryParse(url);
+        links.add(LinkItem(
+          id: 'link_${message.id}_${match.start}',
+          title: uri?.host.isNotEmpty == true ? uri!.host : 'Shared link',
+          url: url,
+          description:
+              'Shared by ${message.isMe ? 'you' : widget.conversation.name} at ${message.time}',
+          icon: LucideIcons.link,
+        ));
+      }
+    }
+    return links;
+  }
+
+  void _showMessageFromMedia(String messageId) {
+    setState(() => _showingContactInfo = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollToMessage(messageId);
+    });
+  }
+
+  Future<bool> _deleteSharedMedia(String messageId) async {
+    ChatMessage? message;
+    for (final item in widget.conversation.messages) {
+      if (item.id == messageId) {
+        message = item;
+        break;
+      }
+    }
+    if (message == null || !message.isMe) return false;
+    await ChatService.deleteMessage(messageId);
+    if (!mounted) return true;
+    setState(() => widget.conversation.messages
+        .removeWhere((item) => item.id == messageId));
+    ChatStateStore.instance.notifyConversationsUpdated();
+    return true;
   }
 
   Future<void> _startCall({required bool video}) async {
@@ -456,8 +817,14 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
         contactAvatar: widget.conversation.avatarUrl,
         contactHandle:
             '@${widget.conversation.name.toLowerCase().replaceAll(' ', '_')}',
+        contactBio: widget.conversation.role,
         isOnline: widget.conversation.isOnline,
         wallpaper: wallpaper,
+        mediaItems: _sharedMediaItems,
+        docItems: _sharedDocumentItems,
+        linkItems: _sharedLinkItems,
+        onShowInChat: _showMessageFromMedia,
+        onDeleteMessage: _deleteSharedMedia,
         onBack: () => setState(() => _showingContactInfo = false),
       );
     }
@@ -1920,6 +2287,25 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
           : widget.conversation.avatarUrl,
       onShowInChat: () => _scrollToMessage(msg.id),
       onShare: () => _forwardMessages([msg]),
+      onDelete: msg.isMe && !msg.id.startsWith('media_')
+          ? () async {
+              try {
+                await ChatService.deleteMessage(msg.id);
+                if (!mounted) return true;
+                setState(() => widget.conversation.messages
+                    .removeWhere((item) => item.id == msg.id));
+                ChatStateStore.instance.notifyConversationsUpdated();
+                return true;
+              } catch (error) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not delete media: $error')),
+                  );
+                }
+                return false;
+              }
+            }
+          : null,
     );
   }
 
@@ -2393,7 +2779,7 @@ class _IndividualChatScreenState extends State<IndividualChatScreen> {
                         child: SpringButton(
                           onTap: () {
                             Navigator.pop(dialogCtx);
-                            _toggleEmojiReaction(msg, '🚀');
+                            _showEmojiPicker(msg);
                           },
                           child: Container(
                             padding: const EdgeInsets.all(5),
